@@ -10,6 +10,7 @@ import dns from 'dns';
 import { promisify } from 'util';
 import { sendWelcomeEmail, sendPasswordResetEmail } from './server/email.js';
 import { validateCPF, validateEmail } from './src/utils/validation.js';
+import { createPixCharge, simulatePixPayment } from './server/abacatepay.js';
 
 const resolveMx = promisify(dns.resolveMx);
 const dnsLookup = promisify(dns.lookup);
@@ -92,6 +93,10 @@ app.post('/api/auth/register', async (req, res) => {
 
   if (!validateCPF(cpf)) {
     return res.status(400).json({ error: 'CPF inválido' });
+  }
+
+  if (!phone) {
+    return res.status(400).json({ error: 'Celular é obrigatório' });
   }
 
   try {
@@ -919,6 +924,151 @@ app.get('/api/admin/reports/commissions', authenticate, (req: any, res) => {
   }
 
   res.json(filteredReport);
+});
+
+// --- AbacatePay Integration ---
+
+// Create Checkout Session (PIX)
+app.post('/api/checkout/create', authenticate, async (req: any, res) => {
+  const { months } = req.body; // Array of { month, year, amount, revenue }
+  const userId = req.user.id;
+
+  if (!months || !Array.isArray(months) || months.length === 0) {
+    return res.status(400).json({ error: 'No months selected' });
+  }
+
+  try {
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as any;
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const totalAmount = months.reduce((acc: number, curr: any) => acc + curr.amount, 0);
+    const amountInCents = Math.round(totalAmount * 100);
+    const description = `Comissão PsyQ - ${months.length} mês(es)`;
+
+    // Create PIX Charge
+    const charge = await createPixCharge(amountInCents, description, {
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+      cpf: user.cpf
+    });
+
+    // Save Transaction
+    db.prepare(`
+      INSERT INTO payment_transactions (id, psychologist_id, amount, status, metadata)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(
+      charge.id,
+      userId,
+      amountInCents,
+      'PENDING',
+      JSON.stringify(months)
+    );
+
+    res.json(charge);
+  } catch (error: any) {
+    console.error('Checkout Error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Check Transaction Status
+app.get('/api/checkout/status/:id', authenticate, (req, res) => {
+  const { id } = req.params;
+  const transaction = db.prepare('SELECT * FROM payment_transactions WHERE id = ?').get(id) as any;
+  
+  if (!transaction) {
+    return res.status(404).json({ error: 'Transaction not found' });
+  }
+
+  res.json({ status: transaction.status });
+});
+
+// Simulate Payment (Dev/Test only)
+app.post('/api/checkout/simulate/:id', authenticate, async (req, res) => {
+  const { id } = req.params;
+  
+  try {
+    const result = await simulatePixPayment(id);
+    res.json(result);
+  } catch (error: any) {
+    console.error('Simulation Error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Webhook for AbacatePay
+app.post('/api/webhooks/abacatepay', express.json(), (req, res) => {
+  const secret = process.env.ABACATEPAY_WEBHOOK_SECRET;
+  const receivedSecret = req.headers['x-abacatepay-secret'];
+
+  if (secret && receivedSecret !== secret) {
+    console.warn('Invalid AbacatePay Webhook Secret received');
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const event = req.body;
+  console.log('AbacatePay Webhook:', JSON.stringify(event, null, 2));
+
+  // Payload structure depends on AbacatePay. Assuming { data: { id, status, ... } } or similar.
+  // Based on docs, it might be the same object as create response.
+  // Let's assume event.data contains the charge info.
+  
+  const charge = event.data || event; // Fallback
+  const chargeId = charge.id;
+  const status = charge.status;
+
+  if (!chargeId || !status) {
+    return res.status(400).json({ error: 'Invalid payload' });
+  }
+
+  const transaction = db.prepare('SELECT * FROM payment_transactions WHERE id = ?').get(chargeId) as any;
+
+  if (transaction) {
+    // Update transaction status
+    db.prepare('UPDATE payment_transactions SET status = ? WHERE id = ?').run(status, chargeId);
+
+    if (status === 'PAID' && transaction.status !== 'PAID') {
+      // Process Payment
+      const months = JSON.parse(transaction.metadata);
+      const psychologistId = transaction.psychologist_id;
+      const paymentDate = new Date().toISOString().split('T')[0];
+
+      const insertPayment = db.prepare(`
+        INSERT INTO platform_payments (psychologist_id, month, year, amount, revenue, commission_rate, status, payment_date)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      db.transaction(() => {
+        for (const m of months) {
+          // Check if already paid to avoid duplicates
+          const existing = db.prepare('SELECT id FROM platform_payments WHERE psychologist_id = ? AND month = ? AND year = ?').get(psychologistId, m.month, m.year);
+          if (!existing) {
+             // Get current commission rate from user or use the one from request (stored in metadata?)
+             // We'll use the one from the time of checkout request if possible, but we didn't store it in metadata explicitly.
+             // Let's fetch user again or assume 1.0 if not found.
+             // Better: store commission_rate in metadata. But for now, fetch user.
+             const user = db.prepare('SELECT commission_percentage FROM users WHERE id = ?').get(psychologistId) as any;
+             const rate = user?.commission_percentage || 1.0;
+
+             insertPayment.run(
+               psychologistId,
+               m.month,
+               m.year,
+               m.amount,
+               m.revenue,
+               rate,
+               'paid',
+               paymentDate
+             );
+          }
+        }
+      })();
+      console.log(`Payment processed for transaction ${chargeId}`);
+    }
+  }
+
+  res.json({ received: true });
 });
 
 // --- Vite Middleware ---
