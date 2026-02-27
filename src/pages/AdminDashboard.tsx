@@ -37,6 +37,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { formatCPF, formatPhone } from '@/utils/validation';
 
 export default function AdminDashboard({ user, setUser }: { user: any, setUser: any }) {
   const [users, setUsers] = useState<any[]>([]);
@@ -262,6 +263,7 @@ export default function AdminDashboard({ user, setUser }: { user: any, setUser: 
                       <th className="p-4 font-semibold text-stone-700">Nome</th>
                       <th className="p-4 font-semibold text-stone-700">Tipo</th>
                       <th className="p-4 font-semibold text-stone-700">CPF</th>
+                      <th className="p-4 font-semibold text-stone-700">Celular</th>
                       <th className="p-4 font-semibold text-stone-700">Login (Email)</th>
                       <th className="p-4 font-semibold text-stone-700">Comissão (%)</th>
                       <th className="p-4 font-semibold text-stone-700">Status</th>
@@ -281,7 +283,8 @@ export default function AdminDashboard({ user, setUser }: { user: any, setUser: 
                             {roleLabels[u.role]}
                           </span>
                         </td>
-                        <td className="p-4 text-stone-600">{u.cpf || '-'}</td>
+                        <td className="p-4 text-stone-600 font-mono text-xs">{u.cpf ? formatCPF(u.cpf) : '-'}</td>
+                        <td className="p-4 text-stone-600 font-mono text-xs">{u.phone ? formatPhone(u.phone) : '-'}</td>
                         <td className="p-4 text-stone-600">{u.email}</td>
                         <td className="p-4">
                           {u.role === 'psychologist' ? (

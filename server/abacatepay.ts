@@ -36,6 +36,29 @@ export async function createPixCharge(amount: number, description: string, custo
   return data.data;
 }
 
+export async function listPixCharges() {
+  const apiKey = process.env.ABACATEPAY_API_KEY;
+  if (!apiKey) {
+    throw new Error('ABACATEPAY_API_KEY is not defined');
+  }
+
+  const response = await fetch(`${API_URL}/billing/list`, {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json'
+    }
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`AbacatePay List Error: ${error}`);
+  }
+
+  const data = await response.json();
+  return data.data; // Array of charges
+}
+
 export async function simulatePixPayment(chargeId: string) {
   const apiKey = process.env.ABACATEPAY_API_KEY;
   if (!apiKey) {

@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { ArrowLeft } from 'lucide-react';
-import { validateCPF, validateEmail, formatCPF } from '@/utils/validation';
+import { validateCPF, validateEmail, formatCPF, formatPhone } from '@/utils/validation';
 
 export default function Register({ setUser }: { setUser: any }) {
   const [name, setName] = useState('');
@@ -154,7 +154,7 @@ export default function Register({ setUser }: { setUser: any }) {
                 type="tel"
                 placeholder="(00) 00000-0000"
                 value={phone}
-                onChange={(e) => setPhone(e.target.value)}
+                onChange={(e) => setPhone(formatPhone(e.target.value))}
                 required
               />
             </div>

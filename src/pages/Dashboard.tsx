@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter }
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { motion, AnimatePresence } from 'framer-motion';
+import { formatCPF, formatPhone } from '@/utils/validation';
 
 export default function Dashboard({ user }: { user: any }) {
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -33,7 +34,7 @@ export default function Dashboard({ user }: { user: any }) {
   const [unpaidPlatformMonths, setUnpaidPlatformMonths] = useState<any[]>([]);
   const [selectedPlatformMonths, setSelectedPlatformMonths] = useState<string[]>([]);
   const [commissionRate, setCommissionRate] = useState(1.0);
-  const [platformPaymentStep, setPlatformPaymentStep] = useState<'selection' | 'pix' | 'success'>('selection');
+  const [platformPaymentStep, setPlatformPaymentStep] = useState<'selection' | 'pix' | 'success' | 'failure'>('selection');
   const [platformPaymentHistory, setPlatformPaymentHistory] = useState<any[]>([]);
   const [isProcessingPlatformPayment, setIsProcessingPlatformPayment] = useState(false);
   const [paymentData, setPaymentData] = useState<any>(null);
@@ -52,9 +53,15 @@ export default function Dashboard({ user }: { user: any }) {
             setPlatformPaymentStep('success');
             fetchData();
             clearInterval(interval);
+          } else if (data.status === 'EXPIRED' || data.status === 'CANCELLED' || data.status === 'REFUNDED') {
+            setPlatformPaymentStep('failure');
+            clearInterval(interval);
           }
-        } catch (e) {
-          console.error('Polling error:', e);
+        } catch (e: any) {
+          // Only log if it's not a network error (which happens during server restarts)
+          if (e.name !== 'TypeError' || e.message !== 'Failed to fetch') {
+            console.error('Polling error:', e);
+          }
         }
       }, 5000);
     }
@@ -626,8 +633,8 @@ export default function Dashboard({ user }: { user: any }) {
                     <div>
                       <h3 className="font-bold text-stone-900">{patient.name}</h3>
                       <p className="text-sm text-stone-500">{patient.email}</p>
-                      <p className="text-sm text-stone-500">CPF: {patient.cpf || '-'}</p>
-                      {patient.phone && <p className="text-sm text-stone-500">{patient.phone}</p>}
+                      <p className="text-sm text-stone-500">CPF: {patient.cpf ? formatCPF(patient.cpf) : '-'}</p>
+                      <p className="text-sm text-stone-500">Celular: {patient.phone ? formatPhone(patient.phone) : '-'}</p>
                     </div>
                     <Button onClick={() => handleAcceptPatient(patient.id)}>
                       <Check className="mr-2 h-4 w-4" /> Aceitar
@@ -650,7 +657,8 @@ export default function Dashboard({ user }: { user: any }) {
               <CardHeader>
                 <CardTitle>{patient.name}</CardTitle>
                 <div className="text-sm text-stone-500">{patient.email}</div>
-                <div className="text-sm text-stone-500">CPF: {patient.cpf || '-'}</div>
+                <div className="text-sm text-stone-500">CPF: {patient.cpf ? formatCPF(patient.cpf) : '-'}</div>
+                <div className="text-sm text-stone-500">Celular: {patient.phone ? formatPhone(patient.phone) : '-'}</div>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
@@ -1392,17 +1400,24 @@ export default function Dashboard({ user }: { user: any }) {
                     <Button 
                       className="w-full h-12 bg-emerald-600 hover:bg-emerald-700 text-white"
                       onClick={async () => {
-                        // Manual check
-                        const token = localStorage.getItem('token');
-                        const res = await fetch(`/api/checkout/status/${paymentData.id}`, {
-                          headers: { Authorization: `Bearer ${token}` }
-                        });
-                        const data = await res.json();
-                        if (data.status === 'PAID') {
-                          setPlatformPaymentStep('success');
-                          fetchData();
-                        } else {
-                          alert('Pagamento ainda não confirmado. Aguarde alguns instantes.');
+                        try {
+                          // Manual check
+                          const token = localStorage.getItem('token');
+                          const res = await fetch(`/api/checkout/status/${paymentData.id}`, {
+                            headers: { Authorization: `Bearer ${token}` }
+                          });
+                          const data = await res.json();
+                          if (data.status === 'PAID') {
+                            setPlatformPaymentStep('success');
+                            fetchData();
+                          } else if (data.status === 'EXPIRED' || data.status === 'CANCELLED' || data.status === 'REFUNDED') {
+                            setPlatformPaymentStep('failure');
+                          } else {
+                            alert('Pagamento ainda não confirmado. Aguarde alguns instantes.');
+                          }
+                        } catch (err) {
+                          console.error('Manual check error:', err);
+                          alert('Não foi possível verificar o status agora. Tente novamente em alguns segundos.');
                         }
                       }}
                       disabled={isProcessingPlatformPayment}
@@ -1475,6 +1490,33 @@ export default function Dashboard({ user }: { user: any }) {
                     }}
                   >
                     Voltar ao Painel
+                  </Button>
+                </div>
+              </motion.div>
+            )}
+
+            {platformPaymentStep === 'failure' && (
+              <motion.div
+                key="failure"
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="text-center"
+              >
+                <div className="bg-white p-12 rounded-3xl border border-stone-200 shadow-xl space-y-6">
+                  <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto">
+                    <X className="h-10 w-10 text-red-600" />
+                  </div>
+                  <div className="space-y-2">
+                    <h2 className="text-3xl font-serif font-bold text-red-900">Pagamento não concluído</h2>
+                    <p className="text-stone-500">Houve um problema ao processar seu pagamento ou o tempo expirou.</p>
+                  </div>
+                  <Button 
+                    className="w-full bg-stone-900 hover:bg-stone-800"
+                    onClick={() => {
+                      setPlatformPaymentStep('selection');
+                    }}
+                  >
+                    Tentar Novamente
                   </Button>
                 </div>
               </motion.div>

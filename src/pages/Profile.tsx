@@ -68,9 +68,10 @@ export default function Profile({ user, setUser }: { user: any, setUser: any }) 
     }
 
     const cpfClean = cpf.replace(/\D/g, '');
+    const phoneClean = phone.replace(/\D/g, '');
     const token = localStorage.getItem('token');
     try {
-      const body: any = { name, phone, cpf: cpfClean };
+      const body: any = { name, phone: phoneClean, cpf: cpfClean };
       if (password) body.password = password;
       if (user.role === 'patient' && selectedPsychologist && selectedPsychologist !== user.psychologist_id) {
         body.psychologist_id = selectedPsychologist;
