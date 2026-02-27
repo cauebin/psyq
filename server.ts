@@ -708,9 +708,9 @@ app.post('/api/therapist/platform-checkout/pay', authenticate, (req: any, res) =
 
   try {
     db.prepare(`
-      INSERT INTO platform_payments (psychologist_id, month, year, amount, revenue, commission_rate, payment_date)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(req.user.id, parseInt(month), parseInt(year), amount, revenue, commission_rate, today);
+      INSERT INTO platform_payments (psychologist_id, month, year, amount, revenue, commission_rate, payment_date, charge_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(req.user.id, parseInt(month), parseInt(year), amount, revenue, commission_rate, today, 'manual');
     
     res.json({ message: 'Platform payment successful' });
   } catch (err: any) {
@@ -723,7 +723,7 @@ app.post('/api/therapist/platform-checkout/pay', authenticate, (req: any, res) =
 
 app.get('/api/admin/users', authenticate, (req: any, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
-  const users = db.prepare("SELECT id, name, email, role, password, deleted, commission_percentage, cpf FROM users").all();
+  const users = db.prepare("SELECT id, name, email, role, password, deleted, commission_percentage, cpf, phone FROM users").all();
   res.json(users);
 });
 
@@ -876,7 +876,7 @@ app.get('/api/admin/reports/commissions', authenticate, (req: any, res) => {
 
     // Get all platform payments for this month
     const payments = db.prepare(`
-      SELECT id, payment_date, amount, revenue
+      SELECT id, payment_date, amount, revenue, charge_id
       FROM platform_payments
       WHERE psychologist_id = ? AND month = ? AND year = ?
     `).all(p.id, monthInt, yearInt) as any[];
@@ -894,7 +894,8 @@ app.get('/api/admin/reports/commissions', authenticate, (req: any, res) => {
         commission_amount: pay.amount,
         status: 'paid',
         payment_date: pay.payment_date,
-        paid_amount: pay.amount
+        paid_amount: pay.amount,
+        charge_id: pay.charge_id
       });
     });
 
@@ -1000,17 +1001,17 @@ app.get('/api/checkout/status/:id', authenticate, async (req, res) => {
             const paymentDate = new Date().toISOString().split('T')[0];
 
             const insertPayment = db.prepare(`
-              INSERT INTO platform_payments (psychologist_id, month, year, amount, revenue, commission_rate, status, payment_date)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+              INSERT INTO platform_payments (psychologist_id, month, year, amount, revenue, commission_rate, status, payment_date, charge_id)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             `);
 
             db.transaction(() => {
               for (const m of months) {
-                const existing = db.prepare('SELECT id FROM platform_payments WHERE psychologist_id = ? AND month = ? AND year = ?').get(psychologistId, m.month, m.year);
+                const existing = db.prepare('SELECT id FROM platform_payments WHERE psychologist_id = ? AND month = ? AND year = ? AND charge_id = ?').get(psychologistId, m.month, m.year, id);
                 if (!existing) {
                   const user = db.prepare('SELECT commission_percentage FROM users WHERE id = ?').get(psychologistId) as any;
                   const rate = user?.commission_percentage || 1.0;
-                  insertPayment.run(psychologistId, m.month, m.year, m.amount, m.revenue, rate, 'paid', paymentDate);
+                  insertPayment.run(psychologistId, m.month, m.year, m.amount, m.revenue, rate, 'paid', paymentDate, id);
                 }
               }
             })();
@@ -1101,19 +1102,15 @@ app.post('/api/webhooks/abacatepay', express.json(), (req, res) => {
       const paymentDate = new Date().toISOString().split('T')[0];
 
       const insertPayment = db.prepare(`
-        INSERT INTO platform_payments (psychologist_id, month, year, amount, revenue, commission_rate, status, payment_date)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO platform_payments (psychologist_id, month, year, amount, revenue, commission_rate, status, payment_date, charge_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
 
       db.transaction(() => {
         for (const m of months) {
-          // Check if already paid to avoid duplicates
-          const existing = db.prepare('SELECT id FROM platform_payments WHERE psychologist_id = ? AND month = ? AND year = ?').get(psychologistId, m.month, m.year);
+          // Check if already paid to avoid duplicates for this specific charge
+          const existing = db.prepare('SELECT id FROM platform_payments WHERE psychologist_id = ? AND month = ? AND year = ? AND charge_id = ?').get(psychologistId, m.month, m.year, chargeId);
           if (!existing) {
-             // Get current commission rate from user or use the one from request (stored in metadata?)
-             // We'll use the one from the time of checkout request if possible, but we didn't store it in metadata explicitly.
-             // Let's fetch user again or assume 1.0 if not found.
-             // Better: store commission_rate in metadata. But for now, fetch user.
              const user = db.prepare('SELECT commission_percentage FROM users WHERE id = ?').get(psychologistId) as any;
              const rate = user?.commission_percentage || 1.0;
 
@@ -1125,7 +1122,8 @@ app.post('/api/webhooks/abacatepay', express.json(), (req, res) => {
                m.revenue,
                rate,
                'paid',
-               paymentDate
+               paymentDate,
+               chargeId
              );
           }
         }

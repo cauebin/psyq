@@ -194,9 +194,14 @@ db.exec(`
     commission_rate REAL NOT NULL,
     status TEXT DEFAULT 'paid',
     payment_date TEXT NOT NULL,
+    charge_id TEXT,
     FOREIGN KEY (psychologist_id) REFERENCES users(id)
   );
 `);
+
+try {
+  db.exec("ALTER TABLE platform_payments ADD COLUMN charge_id TEXT");
+} catch (e) {}
 
 // Subscriptions table for therapists
 db.exec(`

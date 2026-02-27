@@ -740,12 +740,13 @@ export default function AdminDashboard({ user, setUser }: { user: any, setUser: 
                         <th className="p-3 font-semibold text-stone-700 text-sm text-right">Valor Comissão</th>
                         <th className="p-3 font-semibold text-stone-700 text-sm text-center">Status</th>
                         <th className="p-3 font-semibold text-stone-700 text-sm">Data Pagamento</th>
+                        <th className="p-3 font-semibold text-stone-700 text-sm">ID Pagamento</th>
                       </tr>
                     </thead>
                     <tbody>
                       {commissionData.length === 0 ? (
                         <tr>
-                          <td colSpan={6} className="p-8 text-center text-stone-400 italic">Nenhum dado encontrado para este período.</td>
+                          <td colSpan={7} className="p-8 text-center text-stone-400 italic">Nenhum dado encontrado para este período.</td>
                         </tr>
                       ) : (
                         commissionData.map((item, idx) => (
@@ -768,6 +769,9 @@ export default function AdminDashboard({ user, setUser }: { user: any, setUser: 
                             <td className="p-3 text-sm text-stone-500">
                               {item.payment_date ? item.payment_date.split('-').reverse().join('/') : '-'}
                             </td>
+                            <td className="p-3 text-xs text-stone-400 font-mono">
+                              {item.charge_id || '-'}
+                            </td>
                           </tr>
                         ))
                       )}
@@ -781,7 +785,7 @@ export default function AdminDashboard({ user, setUser }: { user: any, setUser: 
                               commissionData.reduce((acc, curr) => acc + curr.commission_amount, 0)
                             )}
                           </td>
-                          <td colSpan={2}></td>
+                          <td colSpan={3}></td>
                         </tr>
                       </tfoot>
                     )}
