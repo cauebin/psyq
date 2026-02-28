@@ -10,7 +10,7 @@ export default function Navbar({ user, setUser }: { user: any, setUser: any }) {
     navigate('/');
   };
 
-  const brandName = user.role === 'psychologist' ? user.name : (user.psychologist_name || 'PsyQ | Terapias');
+  const brandName = 'PsyQ | Terapias';
 
   return (
     <nav className="bg-white shadow-sm border-b border-stone-200">

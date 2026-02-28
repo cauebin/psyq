@@ -30,6 +30,15 @@ export default function Dashboard({ user }: { user: any }) {
   const [reportMonth, setReportMonth] = useState(format(new Date(), 'yyyy-MM'));
   const [pendingPatients, setPendingPatients] = useState<any[]>([]);
 
+  // Booking State
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [selectedTime, setSelectedTime] = useState('');
+  const [isRecurring, setIsRecurring] = useState(false);
+  const [frequency, setFrequency] = useState('weekly');
+  const [selectedPatientForBooking, setSelectedPatientForBooking] = useState('');
+  const [bookingError, setBookingError] = useState('');
+  const [bookingSuccess, setBookingSuccess] = useState('');
+
   // Platform Checkout State
   const [unpaidPlatformMonths, setUnpaidPlatformMonths] = useState<any[]>([]);
   const [selectedPlatformMonths, setSelectedPlatformMonths] = useState<string[]>([]);
@@ -120,7 +129,13 @@ export default function Dashboard({ user }: { user: any }) {
     // Fetch Unpaid Platform Months
     const platRes = await fetch('/api/therapist/platform-checkout/unpaid', { headers });
     const platData = await platRes.json();
-    setUnpaidPlatformMonths(platData.unpaidMonths || []);
+    
+    const sortedUnpaid = (platData.unpaidMonths || []).sort((a: any, b: any) => {
+      if (a.year !== b.year) return parseInt(a.year) - parseInt(b.year);
+      return parseInt(a.month) - parseInt(b.month);
+    });
+    
+    setUnpaidPlatformMonths(sortedUnpaid);
     setCommissionRate(platData.commission_rate || 1.0);
     setPlatformPaymentHistory(platData.history || []);
   };
@@ -216,6 +231,49 @@ export default function Dashboard({ user }: { user: any }) {
       body: JSON.stringify(settings),
     });
     alert('Configurações salvas!');
+  };
+
+  const handleBookAppointment = async () => {
+    if (!selectedDate || !selectedTime || !selectedPatientForBooking) {
+      setBookingError('Selecione uma data, horário e paciente.');
+      return;
+    }
+
+    const token = localStorage.getItem('token');
+    const dateStr = format(selectedDate, 'yyyy-MM-dd');
+
+    try {
+      const res = await fetch('/api/appointments', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}` 
+        },
+        body: JSON.stringify({ 
+          date: dateStr, 
+          start_time: selectedTime, 
+          end_time: addMinutesToTime(selectedTime, settings.session_duration),
+          is_recurring: isRecurring,
+          frequency: isRecurring ? frequency : undefined,
+          patient_id: selectedPatientForBooking,
+          client_date: format(new Date(), 'yyyy-MM-dd'),
+          client_time: format(new Date(), 'HH:mm')
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+
+      setBookingSuccess('Agendamento realizado com sucesso!');
+      setBookingError('');
+      fetchData();
+      setSelectedDate(null);
+      setSelectedTime('');
+      setSelectedPatientForBooking('');
+    } catch (err: any) {
+      setBookingError(err.message);
+      setBookingSuccess('');
+    }
   };
 
   const handleDeleteAppointment = async (id: number) => {
@@ -444,7 +502,7 @@ export default function Dashboard({ user }: { user: any }) {
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <h1 className="text-3xl font-bold text-stone-900">Painel da Psicóloga</h1>
+        <h1 className="text-3xl font-bold text-stone-900">Painel do Terapeuta</h1>
         <div className="flex flex-wrap gap-2">
           <Button variant={selectedTab === 'calendar' ? 'default' : 'outline'} onClick={() => setSelectedTab('calendar')}>
             <CalendarIcon className="mr-2 h-4 w-4" /> Agenda
@@ -475,147 +533,239 @@ export default function Dashboard({ user }: { user: any }) {
       </div>
 
       {selectedTab === 'calendar' && (
-        <div className="space-y-6">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-lg font-medium">
-                {format(currentDate, 'MMMM yyyy', { locale: ptBR })}
-              </CardTitle>
-              <div className="flex space-x-2">
-                <Button variant="outline" size="icon" onClick={() => setCurrentDate(subMonths(currentDate, 1))}>
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <Button variant="outline" size="icon" onClick={() => setCurrentDate(addMonths(currentDate, 1))}>
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-7 gap-2 text-center text-sm font-medium text-stone-500 mb-2">
-                {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map((day) => (
-                  <div key={day}>{day}</div>
-                ))}
-              </div>
-              <div className="grid grid-cols-7 gap-2">
-                {calendarDays.map((day, idx) => {
-                  // Fix timezone issue by treating date string as local
-                  const dayAppointments = appointments
-                    .filter(app => {
-                      const appDate = parseISO(app.date);
-                      return isSameDay(appDate, day);
-                    })
-                    .sort((a, b) => a.start_time.localeCompare(b.start_time));
-                  return (
-                    <div 
-                      key={idx} 
-                      className={`min-h-[100px] p-2 border rounded-md ${
-                        isSameMonth(day, currentDate) ? 'bg-white' : 'bg-stone-50 text-stone-400'
-                      }`}
-                    >
-                      <div className="text-right text-xs mb-1">{format(day, 'd')}</div>
-                      <div className="space-y-1">
-                        {dayAppointments.map((app, i) => (
-                          <div key={i} className="group relative text-xs bg-stone-100 p-1 rounded border border-stone-200" title={`${app.start_time} - ${app.patient_name}`}>
-                            <div className="font-medium">{app.start_time}</div>
-                            <div className="truncate">{app.patient_name}</div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Agendamentos do Mês</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm text-left">
-                  <thead className="text-xs text-stone-700 uppercase bg-stone-50">
-                    <tr>
-                      <th className="px-6 py-3">Data</th>
-                      <th className="px-6 py-3">Horário</th>
-                      <th className="px-6 py-3">Paciente</th>
-                      <th className="px-6 py-3">Link</th>
-                      <th className="px-6 py-3">Ações</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {appointments
-                      .filter(app => isSameMonth(parseISO(app.date), currentDate))
-                      .sort((a, b) => {
-                        const dateCompare = new Date(a.date).getTime() - new Date(b.date).getTime();
-                        if (dateCompare !== 0) return dateCompare;
-                        return a.start_time.localeCompare(b.start_time);
+        <div className="grid gap-6 md:grid-cols-3">
+          <div className="md:col-span-2 space-y-6">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-lg font-medium">
+                  {format(currentDate, 'MMMM yyyy', { locale: ptBR })}
+                </CardTitle>
+                <div className="flex space-x-2">
+                  <Button variant="outline" size="icon" onClick={() => setCurrentDate(subMonths(currentDate, 1))}>
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <Button variant="outline" size="icon" onClick={() => setCurrentDate(addMonths(currentDate, 1))}>
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-7 gap-2 text-center text-sm font-medium text-stone-500 mb-2">
+                  {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map((day) => (
+                    <div key={day}>{day}</div>
+                  ))}
+                </div>
+                <div className="grid grid-cols-7 gap-2">
+                  {calendarDays.map((day, idx) => {
+                    // Fix timezone issue by treating date string as local
+                    const dayAppointments = appointments
+                      .filter(app => {
+                        const appDate = parseISO(app.date);
+                        return isSameDay(appDate, day);
                       })
-                      .map((app) => (
-                      <tr key={app.id} className="bg-white border-b hover:bg-stone-50">
-                        <td className="px-6 py-4 font-medium text-stone-900">
-                          {format(parseISO(app.date), 'dd/MM/yyyy')}
-                        </td>
-                        <td className="px-6 py-4">{app.start_time}</td>
-                        <td className="px-6 py-4">{app.patient_name}</td>
-                        <td className="px-6 py-4">
-                          <Button variant="outline" size="sm" asChild>
-                            <a 
-                              href={getMeetLink(app.meet_link)} 
-                              target={app.meet_link ? "_blank" : undefined} 
-                              rel="noreferrer"
-                              onClick={(e) => {
-                                if (!app.meet_link) {
-                                  e.preventDefault();
-                                  alert('O link da sessão ainda não foi configurado para este paciente.');
-                                }
-                              }}
-                            >
-                              <Video className="mr-2 h-4 w-4" /> Link da Sessão
-                            </a>
-                          </Button>
-                        </td>
-                        <td className="px-6 py-4">
-                          {deletingId === app.id ? (
-                            <div className="flex gap-2">
+                      .sort((a, b) => a.start_time.localeCompare(b.start_time));
+                    return (
+                      <div 
+                        key={idx} 
+                        onClick={() => setSelectedDate(day)}
+                        className={`min-h-[100px] p-2 border rounded-md cursor-pointer transition-colors ${
+                          selectedDate && isSameDay(selectedDate, day) ? 'ring-2 ring-stone-900 border-stone-900' : ''
+                        } ${
+                          isSameMonth(day, currentDate) ? 'bg-white hover:bg-stone-50' : 'bg-stone-50 text-stone-400'
+                        }`}
+                      >
+                        <div className="text-right text-xs mb-1">{format(day, 'd')}</div>
+                        <div className="space-y-1">
+                          {dayAppointments.map((app, i) => (
+                            <div key={i} className="group relative text-xs bg-stone-100 p-1 rounded border border-stone-200" title={`${app.start_time} - ${app.patient_name}`}>
+                              <div className="font-medium">{app.start_time}</div>
+                              <div className="truncate">{app.patient_name}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Agendamentos do Mês</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm text-left">
+                    <thead className="text-xs text-stone-700 uppercase bg-stone-50">
+                      <tr>
+                        <th className="px-6 py-3">Data</th>
+                        <th className="px-6 py-3">Horário</th>
+                        <th className="px-6 py-3">Paciente</th>
+                        <th className="px-6 py-3">Link</th>
+                        <th className="px-6 py-3">Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {appointments
+                        .filter(app => isSameMonth(parseISO(app.date), currentDate))
+                        .sort((a, b) => {
+                          const dateCompare = new Date(a.date).getTime() - new Date(b.date).getTime();
+                          if (dateCompare !== 0) return dateCompare;
+                          return a.start_time.localeCompare(b.start_time);
+                        })
+                        .map((app) => (
+                        <tr key={app.id} className="bg-white border-b hover:bg-stone-50">
+                          <td className="px-6 py-4 font-medium text-stone-900">
+                            {format(parseISO(app.date), 'dd/MM/yyyy')}
+                          </td>
+                          <td className="px-6 py-4">{app.start_time}</td>
+                          <td className="px-6 py-4">{app.patient_name}</td>
+                          <td className="px-6 py-4">
+                            <Button variant="outline" size="sm" asChild>
+                              <a 
+                                href={getMeetLink(app.meet_link)} 
+                                target={app.meet_link ? "_blank" : undefined} 
+                                rel="noreferrer"
+                                onClick={(e) => {
+                                  if (!app.meet_link) {
+                                    e.preventDefault();
+                                    alert('O link da sessão ainda não foi configurado para este paciente.');
+                                  }
+                                }}
+                              >
+                                <Video className="mr-2 h-4 w-4" /> Link da Sessão
+                              </a>
+                            </Button>
+                          </td>
+                          <td className="px-6 py-4">
+                            {deletingId === app.id ? (
+                              <div className="flex gap-2">
+                                <Button 
+                                  size="sm" 
+                                  variant="destructive"
+                                  onClick={() => handleDeleteAppointment(app.id)}
+                                >
+                                  Confirmar
+                                </Button>
+                                <Button 
+                                  size="sm" 
+                                  variant="outline"
+                                  onClick={() => setDeletingId(null)}
+                                >
+                                  Cancelar
+                                </Button>
+                              </div>
+                            ) : (
                               <Button 
                                 size="sm" 
                                 variant="destructive"
-                                onClick={() => handleDeleteAppointment(app.id)}
+                                onClick={() => setDeletingId(app.id)}
                               >
-                                Confirmar
+                                Deletar
                               </Button>
-                              <Button 
-                                size="sm" 
-                                variant="outline"
-                                onClick={() => setDeletingId(null)}
-                              >
-                                Cancelar
-                              </Button>
-                            </div>
-                          ) : (
-                            <Button 
-                              size="sm" 
-                              variant="destructive"
-                              onClick={() => setDeletingId(app.id)}
-                            >
-                              Deletar
-                            </Button>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                    {appointments.filter(app => isSameMonth(parseISO(app.date), currentDate)).length === 0 && (
-                      <tr>
-                        <td colSpan={5} className="px-6 py-4 text-center text-stone-500">Nenhum agendamento para este mês.</td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </CardContent>
-          </Card>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                      {appointments.filter(app => isSameMonth(parseISO(app.date), currentDate)).length === 0 && (
+                        <tr>
+                          <td colSpan={5} className="px-6 py-4 text-center text-stone-500">Nenhum agendamento para este mês.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Detalhes do Agendamento</CardTitle>
+                <CardDescription>
+                  {selectedDate 
+                    ? format(selectedDate, "EEEE, d 'de' MMMM", { locale: ptBR }) 
+                    : 'Selecione uma data no calendário'}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {selectedDate && (
+                  <>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Paciente</label>
+                      <select 
+                        className="flex h-10 w-full rounded-md border border-stone-200 bg-white px-3 py-2 text-sm"
+                        value={selectedPatientForBooking}
+                        onChange={(e) => setSelectedPatientForBooking(e.target.value)}
+                      >
+                        <option value="" disabled>Selecione um paciente</option>
+                        {patients.map(p => (
+                          <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Horários Disponíveis ({settings.session_duration} min)</label>
+                      <div className="grid grid-cols-3 gap-2">
+                        {getAvailableSlots(selectedDate).map((time) => (
+                          <Button
+                            key={time}
+                            variant={selectedTime === time ? 'default' : 'outline'}
+                            size="sm"
+                            onClick={() => setSelectedTime(time)}
+                          >
+                            {time}
+                          </Button>
+                        ))}
+                        {getAvailableSlots(selectedDate).length === 0 && (
+                          <div className="col-span-3 text-sm text-stone-500">Nenhum horário disponível.</div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div className="flex items-center space-x-2">
+                        <input
+                          type="checkbox"
+                          id="recurring"
+                          checked={isRecurring}
+                          onChange={(e) => setIsRecurring(e.target.checked)}
+                          className="h-4 w-4 rounded border-stone-300 text-stone-900 focus:ring-stone-900"
+                        />
+                        <label htmlFor="recurring" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                          Repetir agendamento
+                        </label>
+                      </div>
+
+                      {isRecurring && (
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium">Frequência</label>
+                          <select 
+                            value={frequency} 
+                            onChange={(e) => setFrequency(e.target.value)}
+                            className="flex h-10 w-full rounded-md border border-stone-200 bg-white px-3 py-2 text-sm"
+                          >
+                            <option value="weekly">Semanal (Toda semana)</option>
+                            <option value="biweekly">Quinzenal (A cada 2 semanas)</option>
+                          </select>
+                        </div>
+                      )}
+                    </div>
+
+                    {bookingError && <div className="text-red-500 text-sm">{bookingError}</div>}
+                    {bookingSuccess && <div className="text-green-500 text-sm">{bookingSuccess}</div>}
+
+                    <Button className="w-full" onClick={handleBookAppointment} disabled={!selectedTime || !selectedPatientForBooking}>
+                      Confirmar Agendamento
+                    </Button>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         </div>
       )}
 

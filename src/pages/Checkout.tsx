@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ArrowLeft, CreditCard, QrCode, Copy, CheckCircle2, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { QRCodeSVG } from 'qrcode.react';
 
 interface UnpaidMonth {
   month: string;
@@ -13,18 +14,121 @@ interface UnpaidMonth {
   total_value: number;
 }
 
+// CRC16-CCITT-FALSE implementation for PIX
+function crc16ccitt(str: string) {
+  let crc = 0xFFFF;
+  const strlen = str.length;
+  for (let c = 0; c < strlen; c++) {
+    crc ^= str.charCodeAt(c) << 8;
+    for (let i = 0; i < 8; i++) {
+      if (crc & 0x8000) {
+        crc = (crc << 1) ^ 0x1021;
+      } else {
+        crc = crc << 1;
+      }
+    }
+  }
+  let hex = (crc & 0xFFFF).toString(16).toUpperCase();
+  if (hex.length < 4) hex = '0'.repeat(4 - hex.length) + hex;
+  return hex;
+}
+
+function generatePixPayload(key: string, name: string, city: string, amount: string, txtId: string = '***') {
+  const cleanKey = key.replace(/\s/g, '');
+  // Normalize name and city to remove accents and limit length
+  const cleanName = name.substring(0, 25).normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const cleanCity = city.substring(0, 15).normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const cleanAmount = parseFloat(amount).toFixed(2);
+
+  // Field 26: Merchant Account Information
+  // 00 (GUI) + 14 (len) + br.gov.bcb.pix
+  // 01 (Key) + len + key
+  const gui = '0014br.gov.bcb.pix';
+  const keyField = `01${cleanKey.length.toString().padStart(2, '0')}${cleanKey}`;
+  const merchantAccountInfoContent = gui + keyField;
+  const merchantAccountInfo = `26${merchantAccountInfoContent.length.toString().padStart(2, '0')}${merchantAccountInfoContent}`;
+
+  // Field 52: Merchant Category Code (0000 = Unspecified)
+  const merchantCategoryCode = '52040000';
+
+  // Field 53: Transaction Currency (986 = BRL)
+  const transactionCurrency = '5303986';
+
+  // Field 54: Transaction Amount
+  const transactionAmount = `54${cleanAmount.length.toString().padStart(2, '0')}${cleanAmount}`;
+
+  // Field 58: Country Code
+  const countryCode = '5802BR';
+
+  // Field 59: Merchant Name
+  const merchantName = `59${cleanName.length.toString().padStart(2, '0')}${cleanName}`;
+
+  // Field 60: Merchant City
+  const merchantCity = `60${cleanCity.length.toString().padStart(2, '0')}${cleanCity}`;
+
+  // Field 62: Additional Data Field Template
+  // 05 (TxID) + len + value
+  const txIdContent = `05${txtId.length.toString().padStart(2, '0')}${txtId}`;
+  const additionalDataField = `62${txIdContent.length.toString().padStart(2, '0')}${txIdContent}`;
+
+  // Field 63: CRC16 (04 bytes placeholder)
+  const payloadWithoutCrc = 
+    '000201' + 
+    merchantAccountInfo + 
+    merchantCategoryCode + 
+    transactionCurrency + 
+    transactionAmount + 
+    countryCode + 
+    merchantName + 
+    merchantCity + 
+    additionalDataField + 
+    '6304';
+
+  const crc = crc16ccitt(payloadWithoutCrc);
+  return payloadWithoutCrc + crc;
+}
+
 export default function Checkout({ user }: { user: any }) {
   const [unpaidMonths, setUnpaidMonths] = useState<UnpaidMonth[]>([]);
   const [selectedMonths, setSelectedMonths] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [paying, setPaying] = useState(false);
   const [paymentStep, setPaymentStep] = useState<'selection' | 'pix' | 'success'>('selection');
-  const [pixCode] = useState('00020126580014BR.GOV.BCB.PIX0136psyq-pagamentos-1234-5678-9012-3456520400005303986540510.005802BR5925PsyQ Pagamentos Ltda6009SAO PAULO62070503***6304E2B1');
+  const [pixCode, setPixCode] = useState('');
+  const [psychologistData, setPsychologistData] = useState<any>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
     fetchUnpaid();
+    fetchPsychologistData();
   }, []);
+
+  const fetchPsychologistData = async () => {
+    const token = localStorage.getItem('token');
+    try {
+      const res = await fetch('/api/auth/me', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (data.psychologist_id) {
+        // Fetch psychologist details to get PIX key
+        // We need an endpoint for this or include it in /api/auth/me if user is patient
+        // Since we updated /api/auth/me to include psychologist_email, we might need more info
+        // Let's fetch the psychologist public info or use a new endpoint
+        // For now, let's assume we can get it from a specific endpoint or update /api/auth/me further
+        // Actually, let's create a specific endpoint to get payment info
+        const payRes = await fetch('/api/checkout/payment-info', {
+           headers: { Authorization: `Bearer ${token}` }
+        });
+        if (payRes.ok) {
+           const payData = await payRes.json();
+           setPsychologistData(payData);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching psychologist data:', err);
+    }
+  };
 
   const fetchUnpaid = async () => {
     setLoading(true);
@@ -34,7 +138,11 @@ export default function Checkout({ user }: { user: any }) {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
-      setUnpaidMonths(data);
+      const sortedData = data.sort((a: any, b: any) => {
+        if (a.year !== b.year) return parseInt(a.year) - parseInt(b.year);
+        return parseInt(a.month) - parseInt(b.month);
+      });
+      setUnpaidMonths(sortedData);
     } catch (err) {
       console.error('Error fetching unpaid sessions:', err);
     } finally {
@@ -54,6 +162,18 @@ export default function Checkout({ user }: { user: any }) {
 
   const handlePay = () => {
     if (selectedMonths.length === 0) return;
+    
+    if (psychologistData && psychologistData.pixKey) {
+      const code = generatePixPayload(
+        psychologistData.pixKey,
+        psychologistData.name,
+        psychologistData.city || 'Brasilia',
+        totalToPay.toString(),
+        'PAGAMENTO'
+      );
+      setPixCode(code);
+    }
+    
     setPaymentStep('pix');
   };
 
@@ -204,12 +324,7 @@ export default function Checkout({ user }: { user: any }) {
               </div>
               <CardContent className="p-8 flex flex-col items-center">
                 <div className="bg-white p-4 rounded-2xl border-2 border-stone-100 shadow-inner mb-8">
-                  {/* Simulated QR Code */}
-                  <img 
-                    src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(pixCode)}`}
-                    alt="PIX QR Code"
-                    className="w-48 h-48"
-                  />
+                  <QRCodeSVG value={pixCode} size={200} />
                 </div>
 
                 <div className="w-full space-y-4">

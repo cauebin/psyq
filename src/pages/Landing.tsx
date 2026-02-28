@@ -6,12 +6,11 @@ export default function Landing() {
   return (
     <div className="min-h-screen bg-stone-50 flex flex-col items-center justify-center p-6 gap-12">
       <div className="text-center space-y-4 max-w-2xl">
-        <div className="w-16 h-16 bg-stone-900 rounded-full flex items-center justify-center text-white font-bold text-3xl mx-auto mb-6">
-          P
-        </div>
-        <h1 className="text-4xl md:text-5xl font-bold text-stone-900 tracking-tight">
-          PsyQ | Terapias
-        </h1>
+        <img 
+          src="/logo.png" 
+          alt="PsyQ Logo" 
+          className="h-32 w-auto mx-auto mb-6 object-contain"
+        />
         <p className="text-xl text-stone-600">
           Conectando pacientes e terapeutas de forma simples e eficiente.
         </p>

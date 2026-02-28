@@ -74,6 +74,10 @@ try {
   db.prepare("ALTER TABLE users ADD COLUMN deleted INTEGER DEFAULT 0").run();
 } catch (e) { /* ignore if exists */ }
 
+try {
+  db.prepare("ALTER TABLE users ADD COLUMN pix_key_type TEXT DEFAULT 'email'").run();
+} catch (e) { /* ignore if exists */ }
+
 // Backfill accepted status for existing users
 // ...
 
@@ -97,6 +101,12 @@ app.post('/api/auth/register', async (req, res) => {
 
   if (!phone) {
     return res.status(400).json({ error: 'Celular é obrigatório' });
+  }
+
+  // Check if CPF already exists for this role
+  const existingUser = db.prepare('SELECT id FROM users WHERE cpf = ? AND role = ?').get(cpf, role);
+  if (existingUser) {
+    return res.status(400).json({ error: 'CPF já cadastrado para este tipo de usuário.' });
   }
 
   try {
@@ -165,12 +175,13 @@ app.post('/api/auth/forgot-password', (req, res) => {
 });
 
 app.get('/api/auth/me', authenticate, (req: any, res) => {
-  const user: any = db.prepare('SELECT id, name, email, role, price_per_session, meet_link, psychologist_id, phone, accepted, crp, cpf FROM users WHERE id = ?').get(req.user.id);
+  const user: any = db.prepare('SELECT id, name, email, role, price_per_session, meet_link, psychologist_id, phone, accepted, crp, cpf, pix_key_type FROM users WHERE id = ?').get(req.user.id);
   
   if (user.role === 'patient' && user.psychologist_id) {
-    const psychologist = db.prepare('SELECT name FROM users WHERE id = ?').get(user.psychologist_id) as any;
+    const psychologist = db.prepare('SELECT name, email FROM users WHERE id = ?').get(user.psychologist_id) as any;
     if (psychologist) {
       user.psychologist_name = psychologist.name;
+      user.psychologist_email = psychologist.email;
     }
   }
   
@@ -200,7 +211,7 @@ app.post('/api/patients/select-psychologist', authenticate, (req: any, res) => {
 
 // Update Profile (Self)
 app.put('/api/patients/me', authenticate, (req: any, res) => {
-  const { name, phone, password, psychologist_id, crp, cpf } = req.body;
+  const { name, phone, password, psychologist_id, crp, cpf, pix_key_type } = req.body;
   
   if (cpf !== undefined && !validateCPF(cpf)) {
     return res.status(400).json({ error: 'CPF inválido' });
@@ -225,6 +236,10 @@ app.put('/api/patients/me', authenticate, (req: any, res) => {
 
   if (crp !== undefined && req.user.role === 'psychologist') {
     db.prepare('UPDATE users SET crp = ? WHERE id = ?').run(crp, req.user.id);
+  }
+  
+  if (pix_key_type !== undefined && ['email', 'cpf', 'phone'].includes(pix_key_type)) {
+    db.prepare('UPDATE users SET pix_key_type = ? WHERE id = ?').run(pix_key_type, req.user.id);
   }
 
   // If changing psychologist, reset accepted status
@@ -321,10 +336,10 @@ app.put('/api/patients/:id', authenticate, (req: any, res) => {
 // Settings
 app.get('/api/settings', authenticate, (req: any, res) => {
   const targetId = req.user.role === 'psychologist' ? req.user.id : req.user.psychologist_id;
-  if (!targetId) return res.json({ session_duration: 60, work_on_holidays: 0 });
+  if (!targetId) return res.json({ session_duration: 90, work_on_holidays: 0 });
   
   const settings = db.prepare('SELECT session_duration, work_on_holidays FROM users WHERE id = ?').get(targetId);
-  res.json(settings || { session_duration: 60, work_on_holidays: 0 });
+  res.json(settings || { session_duration: 90, work_on_holidays: 0 });
 });
 
 app.put('/api/settings', authenticate, (req: any, res) => {
@@ -429,10 +444,12 @@ app.get('/api/appointments', authenticate, (req: any, res) => {
 
 app.post('/api/appointments', authenticate, (req: any, res) => {
   console.log('[POST /api/appointments] Body:', req.body);
-  const { date, start_time, end_time, is_recurring } = req.body;
-  const patient_id = req.user.id;
+  const { date, start_time, end_time, is_recurring, patient_id: body_patient_id } = req.body;
+  const patient_id = req.user.role === 'psychologist' ? body_patient_id : req.user.id;
   
   try {
+    if (!patient_id) throw new Error('Patient ID is required');
+
     // Validate inputs
     if (!date || !start_time || !end_time) {
       throw new Error('Missing required fields');
@@ -441,7 +458,11 @@ app.post('/api/appointments', authenticate, (req: any, res) => {
     // Get patient's psychologist and price info
     const patient = db.prepare('SELECT psychologist_id, price_per_session, previous_price, price_effective_date FROM users WHERE id = ?').get(patient_id) as any;
     if (!patient || !patient.psychologist_id) return res.status(400).json({ error: 'Patient not linked to a psychologist' });
+    
     const psychologist_id = patient.psychologist_id;
+    if (req.user.role === 'psychologist' && psychologist_id !== req.user.id) {
+       return res.status(403).json({ error: 'Unauthorized to book for this patient' });
+    }
     
     // Determine the correct price based on the appointment date
     let price = patient.price_per_session;
@@ -1133,6 +1154,46 @@ app.post('/api/webhooks/abacatepay', express.json(), (req, res) => {
   }
 
   res.json({ received: true });
+});
+
+// Get Psychologist Payment Info
+app.get('/api/checkout/payment-info', authenticate, (req: any, res) => {
+  if (req.user.role !== 'patient') return res.status(403).json({ error: 'Only patients can access this' });
+  
+  const user: any = db.prepare('SELECT psychologist_id FROM users WHERE id = ?').get(req.user.id);
+  if (!user || !user.psychologist_id) return res.status(404).json({ error: 'Psychologist not found' });
+
+  const psychologist: any = db.prepare('SELECT name, email, cpf, phone, pix_key_type FROM users WHERE id = ?').get(user.psychologist_id);
+  
+  if (!psychologist) return res.status(404).json({ error: 'Psychologist not found' });
+
+  let pixKey = psychologist.email;
+  if (psychologist.pix_key_type === 'cpf') {
+    pixKey = psychologist.cpf.replace(/\D/g, '');
+  }
+  if (psychologist.pix_key_type === 'phone') {
+    let phoneDigits = psychologist.phone.replace(/\D/g, '');
+    
+    if (phoneDigits.startsWith('55') && (phoneDigits.length === 12 || phoneDigits.length === 13)) {
+      phoneDigits = phoneDigits.substring(2);
+    }
+    
+    if (phoneDigits.startsWith('0')) {
+      phoneDigits = phoneDigits.substring(1);
+    }
+
+    if (phoneDigits.length === 10 || phoneDigits.length === 11) {
+      pixKey = `+55${phoneDigits}`;
+    } else {
+      pixKey = psychologist.phone; // Fallback
+    }
+  }
+
+  res.json({
+    name: psychologist.name,
+    pixKey: pixKey,
+    city: 'Brasilia' // Default city or add to DB if needed
+  });
 });
 
 // --- Vite Middleware ---

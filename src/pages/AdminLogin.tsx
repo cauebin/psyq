@@ -79,8 +79,8 @@ export default function AdminLogin({ setUser }: { setUser: any }) {
               <label htmlFor="email" className="text-sm font-medium">Login</label>
               <Input
                 id="email"
-                type="email"
-                placeholder="admin@psyq.com"
+                type="text"
+                placeholder="admin"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required

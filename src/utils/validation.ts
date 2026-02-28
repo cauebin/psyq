@@ -47,6 +47,15 @@ export function formatCPF(cpf: string): string {
 
 export function formatPhone(phone: string): string {
   let val = phone.replace(/\D/g, '');
+  
+  if (val.startsWith('55') && (val.length === 12 || val.length === 13)) {
+    val = val.substring(2);
+  }
+  
+  if (val.startsWith('0')) {
+    val = val.substring(1);
+  }
+  
   if (val.length > 11) val = val.slice(0, 11);
   if (val.length > 10) return val.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3');
   if (val.length > 6) return val.replace(/(\d{2})(\d{4})(\d{0,4})/, '($1) $2-$3');

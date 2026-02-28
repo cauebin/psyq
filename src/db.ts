@@ -25,7 +25,7 @@ db.exec(`
     previous_price REAL DEFAULT 0,
     price_effective_date TEXT,
     account_status TEXT DEFAULT 'active',
-    session_duration INTEGER DEFAULT 60,
+    session_duration INTEGER DEFAULT 90,
     meet_link TEXT,
     psychologist_id INTEGER,
     phone TEXT,
@@ -85,7 +85,7 @@ try {
           previous_price REAL DEFAULT 0,
           price_effective_date TEXT,
           account_status TEXT DEFAULT 'active',
-          session_duration INTEGER DEFAULT 60,
+          session_duration INTEGER DEFAULT 90,
           meet_link TEXT,
           psychologist_id INTEGER,
           phone TEXT,
@@ -126,7 +126,7 @@ try {
   db.exec("ALTER TABLE users ADD COLUMN price_per_session REAL DEFAULT 0");
 } catch (e) {}
 try {
-  db.exec("ALTER TABLE users ADD COLUMN session_duration INTEGER DEFAULT 60");
+  db.exec("ALTER TABLE users ADD COLUMN session_duration INTEGER DEFAULT 90");
 } catch (e) {}
 try {
   db.exec("ALTER TABLE users ADD COLUMN meet_link TEXT");
@@ -318,7 +318,7 @@ db.exec(`
 `);
 
 // Seed Admin account
-const adminEmail = 'cauebin@gmail.com';
+const adminEmail = 'admin';
 const checkAdmin = db.prepare('SELECT * FROM users WHERE email = ?').get(adminEmail);
 
 if (!checkAdmin) {
@@ -336,6 +336,8 @@ if (!checkAdmin) {
 } else {
   // Ensure role is admin if it was previously something else
   db.prepare("UPDATE users SET role = 'admin' WHERE email = ?").run(adminEmail);
+  const hashedPassword = bcrypt.hashSync('admin123', 10);
+  db.prepare("UPDATE users SET password = ? WHERE email = ?").run(hashedPassword, adminEmail);
 }
 
 // Data correction for platform payments

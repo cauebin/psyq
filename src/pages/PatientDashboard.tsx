@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths, isSameMonth, parseISO, startOfWeek, endOfWeek, isBefore, startOfDay, addDays, subDays } from 'date-fns';
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths, isSameMonth, parseISO, startOfWeek, endOfWeek, isBefore, startOfDay, addDays, subDays, addMinutes, getYear, addWeeks } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Video, Clock, X, CreditCard } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -14,13 +14,14 @@ export default function PatientDashboard({ user }: { user: any }) {
   const [busySlots, setBusySlots] = useState<any[]>([]);
   const [availability, setAvailability] = useState<any[]>([]);
   const [report, setReport] = useState<any>(null);
-  const [settings, setSettings] = useState<any>({ session_duration: 60, work_on_holidays: 0 });
+  const [settings, setSettings] = useState<any>({ session_duration: 90, work_on_holidays: 0 });
   const [holidays, setHolidays] = useState<any[]>([]);
   const [absences, setAbsences] = useState<any[]>([]);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedTime, setSelectedTime] = useState('');
   const [isRecurring, setIsRecurring] = useState(false);
   const [frequency, setFrequency] = useState('weekly');
+  const [receiveInvite, setReceiveInvite] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -86,6 +87,74 @@ export default function PatientDashboard({ user }: { user: any }) {
     return `https://${link}`;
   };
 
+  const generateICS = (date: Date, startTimeStr: string, isRecurring: boolean, frequency: string) => {
+    const startTime = parseISO(`${format(date, 'yyyy-MM-dd')}T${startTimeStr}`);
+    const endTime = addMinutes(startTime, settings.session_duration || 50);
+    
+    const getUTCString = (d: Date) => d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+    
+    const dtStart = getUTCString(startTime);
+    const dtEnd = getUTCString(endTime);
+    const now = getUTCString(new Date());
+    
+    const title = "Sessão de Terapia";
+    const description = `Sessão com ${currentUser.psychologist_name || 'Terapeuta'}.\\nLink: ${getMeetLink(currentUser.meet_link)}`;
+    const location = getMeetLink(currentUser.meet_link);
+    const organizer = `MAILTO:${currentUser.psychologist_email || ''}`;
+    const attendee = `MAILTO:${currentUser.email || ''}`;
+    
+    let rrule = '';
+    if (isRecurring) {
+      const intervalWeeks = frequency === 'biweekly' ? 2 : 1;
+      const currentYear = getYear(date);
+      
+      let nextDate = addWeeks(date, intervalWeeks);
+      let count = 1;
+      
+      while (getYear(nextDate) === currentYear) {
+        count++;
+        nextDate = addWeeks(nextDate, intervalWeeks);
+      }
+
+      if (frequency === 'weekly') {
+        rrule = `RRULE:FREQ=WEEKLY;COUNT=${count}`;
+      } else if (frequency === 'biweekly') {
+        rrule = `RRULE:FREQ=WEEKLY;INTERVAL=2;COUNT=${count}`;
+      }
+    }
+
+    const icsContent = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//PsyQ//Terapia//PT',
+      'CALSCALE:GREGORIAN',
+      'METHOD:REQUEST',
+      'BEGIN:VEVENT',
+      `UID:${Math.random().toString(36).substring(2)}@psyq.com`,
+      `DTSTAMP:${now}`,
+      `DTSTART:${dtStart}`,
+      `DTEND:${dtEnd}`,
+      `SUMMARY:${title}`,
+      `DESCRIPTION:${description}`,
+      `LOCATION:${location}`,
+      `ORGANIZER:${organizer}`,
+      `ATTENDEE;RSVP=TRUE:${attendee}`,
+      rrule,
+      'STATUS:CONFIRMED',
+      'SEQUENCE:0',
+      'END:VEVENT',
+      'END:VCALENDAR'
+    ].filter(Boolean).join('\r\n');
+
+    const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
+    const link = document.createElement('a');
+    link.href = window.URL.createObjectURL(blob);
+    link.setAttribute('download', `sessao_terapia_${format(date, 'yyyyMMdd')}.ics`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const handleBookAppointment = async () => {
     if (!selectedDate || !selectedTime) {
       setError('Selecione uma data e horário.');
@@ -115,6 +184,10 @@ export default function PatientDashboard({ user }: { user: any }) {
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
+
+      if (receiveInvite) {
+        generateICS(selectedDate, selectedTime, isRecurring, frequency);
+      }
 
       setSuccess('Agendamento realizado com sucesso!');
       setError('');
@@ -267,7 +340,7 @@ export default function PatientDashboard({ user }: { user: any }) {
             onClick={(e) => {
               if (!currentUser.meet_link) {
                 e.preventDefault();
-                alert('O link da sessão ainda não foi configurado pela psicóloga.');
+                alert('O link da sessão ainda não foi configurado pelo terapeuta.');
               }
             }}
           >
@@ -300,7 +373,10 @@ export default function PatientDashboard({ user }: { user: any }) {
               </div>
               <div className="grid grid-cols-7 gap-2">
                 {calendarDays.map((day, idx) => {
-                  const dayAppointments = appointments.filter(app => isSameDay(parseISO(app.date), day));
+                  const dayAppointments = appointments
+                    .filter(app => isSameDay(parseISO(app.date), day))
+                    .sort((a, b) => a.start_time.localeCompare(b.start_time));
+
                   const isSelected = selectedDate && isSameDay(selectedDate, day);
                   const isToday = isSameDay(new Date(), day);
                   const dateStr = format(day, 'yyyy-MM-dd');
@@ -390,7 +466,11 @@ export default function PatientDashboard({ user }: { user: any }) {
                   <tbody>
                     {appointments
                       .filter(app => isSameMonth(parseISO(app.date), currentDate))
-                      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+                      .sort((a, b) => {
+                        const dateCompare = a.date.localeCompare(b.date);
+                        if (dateCompare !== 0) return dateCompare;
+                        return a.start_time.localeCompare(b.start_time);
+                      })
                       .map((app) => {
                         const todayStr = format(new Date(), 'yyyy-MM-dd');
                         const isPast = app.date < todayStr || (app.date === todayStr && app.start_time < format(new Date(), 'HH:mm'));
@@ -404,8 +484,9 @@ export default function PatientDashboard({ user }: { user: any }) {
                             <td className="px-6 py-4">{app.start_time}</td>
                             <td className="px-6 py-4">
                               {!isPast && (
-                                deletingId === app.id ? (
-                                  <div className="flex gap-2">
+                                <div className="flex gap-2">
+                                  {deletingId === app.id ? (
+                                    <div className="flex gap-2">
                                     <Button 
                                       size="sm" 
                                       variant="destructive"
@@ -430,7 +511,8 @@ export default function PatientDashboard({ user }: { user: any }) {
                                   >
                                     Deletar
                                   </Button>
-                                )
+                                )}
+                                  </div>
                               )}
                               {isPast && <span className="text-stone-400 italic">Concluído</span>}
                             </td>
@@ -508,6 +590,19 @@ export default function PatientDashboard({ user }: { user: any }) {
                         </select>
                       </div>
                     )}
+
+                    <div className="flex items-center space-x-2 pt-2 border-t border-stone-100">
+                      <input
+                        type="checkbox"
+                        id="receiveInvite"
+                        checked={receiveInvite}
+                        onChange={(e) => setReceiveInvite(e.target.checked)}
+                        className="h-4 w-4 rounded border-stone-300 text-stone-900 focus:ring-stone-900"
+                      />
+                      <label htmlFor="receiveInvite" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                        Receber invite (.ics)
+                      </label>
+                    </div>
                   </div>
 
                   {error && <div className="text-red-500 text-sm">{error}</div>}

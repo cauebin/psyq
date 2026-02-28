@@ -104,7 +104,7 @@ export default function Register({ setUser }: { setUser: any }) {
             variant="ghost" 
             size="icon" 
             className="absolute left-4 top-4"
-            onClick={() => navigate('/login')}
+            onClick={() => navigate(queryRole ? `/login?role=${queryRole}` : '/login')}
           >
             <ArrowLeft className="h-4 w-4" />
           </Button>

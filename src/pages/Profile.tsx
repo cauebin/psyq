@@ -22,6 +22,7 @@ export default function Profile({ user, setUser }: { user: any, setUser: any }) 
   const [phone, setPhone] = useState(formatPhone(user.phone || ''));
   const [cpf, setCpf] = useState(formatCPF(user.cpf || ''));
   const [crp, setCrp] = useState(user.crp || '');
+  const [pixKeyType, setPixKeyType] = useState(user.pix_key_type || 'email');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [psychologists, setPsychologists] = useState<any[]>([]);
@@ -78,6 +79,7 @@ export default function Profile({ user, setUser }: { user: any, setUser: any }) 
       }
       if (user.role === 'psychologist') {
         body.crp = crp;
+        body.pix_key_type = pixKeyType;
       }
 
       const res = await fetch('/api/patients/me', {
@@ -185,20 +187,36 @@ export default function Profile({ user, setUser }: { user: any, setUser: any }) 
             </div>
 
             {user.role === 'psychologist' && (
-              <div className="space-y-2">
-                <label className="text-sm font-medium">CRP (Conselho Regional de Psicologia)</label>
-                <div className="relative">
-                  <FileText className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 h-4 w-4" />
-                  <Input 
-                    className="pl-10" 
-                    placeholder="06/12345" 
-                    value={crp}
-                    onChange={(e) => setCrp(e.target.value)}
-                    maxLength={9}
-                  />
+              <>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">CRP (Conselho Regional de Psicologia)</label>
+                  <div className="relative">
+                    <FileText className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 h-4 w-4" />
+                    <Input 
+                      className="pl-10" 
+                      placeholder="06/12345" 
+                      value={crp}
+                      onChange={(e) => setCrp(e.target.value)}
+                      maxLength={9}
+                    />
+                  </div>
+                  <p className="text-xs text-stone-500">Formato: XX/XXXXX (ex: 06/12345)</p>
                 </div>
-                <p className="text-xs text-stone-500">Formato: XX/XXXXX (ex: 06/12345)</p>
-              </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Chave PIX Preferencial</label>
+                  <select 
+                    className="flex h-10 w-full rounded-md border border-stone-200 bg-white px-3 py-2 text-sm"
+                    value={pixKeyType}
+                    onChange={(e) => setPixKeyType(e.target.value)}
+                  >
+                    <option value="email">E-mail ({user.email})</option>
+                    <option value="cpf">CPF ({cpf || 'Não informado'})</option>
+                    <option value="phone">Celular ({phone || 'Não informado'})</option>
+                  </select>
+                  <p className="text-xs text-stone-500">Esta chave será usada para gerar o QR Code de pagamento para seus pacientes.</p>
+                </div>
+              </>
             )}
 
             <div className="border-t pt-4 mt-4">
