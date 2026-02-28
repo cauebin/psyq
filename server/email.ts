@@ -1,5 +1,5 @@
 import { Resend } from 'resend';
-import { format, parseISO, addMinutes, getYear, addWeeks } from 'date-fns';
+import { format, parseISO, addMinutes, getYear, addWeeks, addHours } from 'date-fns';
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
@@ -64,7 +64,7 @@ export async function sendSessionInviteEmail(to: string[], sessionDetails: any) 
 function generateICSContent(details: any) {
   const { date, startTime: startTimeStr, duration, isRecurring, frequency, psychologistName, psychologistEmail, patientEmail, meetLink } = details;
   
-  const startDateTime = parseISO(`${date}T${startTimeStr}`);
+  const startDateTime = addHours(parseISO(`${date}T${startTimeStr}`), 3);
   const endDateTime = addMinutes(startDateTime, duration || 50);
   
   const getUTCString = (d: Date) => d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';

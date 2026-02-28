@@ -536,10 +536,13 @@ app.post('/api/appointments', authenticate, (req: any, res) => {
     
     // Send session invite email if requested
     if (req.body.receiveInvite) {
-      const patientUser = db.prepare('SELECT name, email FROM users WHERE id = ?').get(patient_id) as any;
+      const patientUser = db.prepare('SELECT name, email, meet_link FROM users WHERE id = ?').get(patient_id) as any;
       const psychologistUser = db.prepare('SELECT name, email, meet_link, session_duration FROM users WHERE id = ?').get(psychologist_id) as any;
       
       if (patientUser && psychologistUser) {
+        const meetLinkRaw = patientUser.meet_link || psychologistUser.meet_link;
+        const meetLink = meetLinkRaw ? (meetLinkRaw.startsWith('http') ? meetLinkRaw : `https://${meetLinkRaw}`) : '';
+
         const sessionDetails = {
           patientName: patientUser.name,
           psychologistName: psychologistUser.name,
@@ -549,7 +552,7 @@ app.post('/api/appointments', authenticate, (req: any, res) => {
           startTime: start_time,
           endTime: end_time,
           duration: psychologistUser.session_duration,
-          meetLink: psychologistUser.meet_link ? (psychologistUser.meet_link.startsWith('http') ? psychologistUser.meet_link : `https://${psychologistUser.meet_link}`) : '',
+          meetLink,
           isRecurring: !!is_recurring,
           frequency: req.body.frequency
         };
