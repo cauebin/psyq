@@ -24,7 +24,7 @@ export default function Navbar({ user, setUser }: { user: any, setUser: any }) {
           <div className="flex items-center space-x-4">
             <Link to="/profile" className="flex items-center text-sm text-stone-600 hover:text-stone-900 transition-colors">
               <UserIcon className="h-4 w-4 mr-2" />
-              {user.name} ({user.role === 'psychologist' ? 'Terapeuta' : 'Paciente'})
+              {user?.name} ({user?.role === 'psychologist' ? 'Terapeuta' : 'Paciente'})
             </Link>
             <button
               onClick={handleLogout}

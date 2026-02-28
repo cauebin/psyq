@@ -185,9 +185,9 @@ export default function AdminDashboard({ user, setUser }: { user: any, setUser: 
   };
 
   const filteredUsers = users.filter(u => 
-    u.role !== 'admin' && (
-      u.name.toLowerCase().includes(search.toLowerCase()) || 
-      u.email.toLowerCase().includes(search.toLowerCase())
+    u?.role !== 'admin' && (
+      u?.name?.toLowerCase().includes(search.toLowerCase()) || 
+      u?.email?.toLowerCase().includes(search.toLowerCase())
     )
   );
 
@@ -280,14 +280,14 @@ export default function AdminDashboard({ user, setUser }: { user: any, setUser: 
                             u.role === 'psychologist' ? 'bg-blue-100 text-blue-700' :
                             'bg-stone-100 text-stone-700'
                           }`}>
-                            {roleLabels[u.role]}
+                            {roleLabels[u?.role]}
                           </span>
                         </td>
                         <td className="p-4 text-stone-600 font-mono text-xs">{u.cpf ? formatCPF(u.cpf) : '-'}</td>
                         <td className="p-4 text-stone-600 font-mono text-xs">{u.phone ? formatPhone(u.phone) : '-'}</td>
                         <td className="p-4 text-stone-600">{u.email}</td>
                         <td className="p-4">
-                          {u.role === 'psychologist' ? (
+                          {u?.role === 'psychologist' ? (
                             <div className="flex items-center gap-2">
                               <Input 
                                 type="number" 
@@ -303,14 +303,14 @@ export default function AdminDashboard({ user, setUser }: { user: any, setUser: 
                         </td>
                         <td className="p-4">
                           <button 
-                            onClick={() => u.role !== 'admin' && handleToggleStatus(u.id, u.deleted)}
-                            disabled={u.role === 'admin'}
+                            onClick={() => u?.role !== 'admin' && handleToggleStatus(u.id, u.deleted)}
+                            disabled={u?.role === 'admin'}
                             className={`flex items-center gap-2 px-2 py-1 rounded-full text-xs font-medium transition-colors ${
                               u.deleted 
                                 ? 'bg-red-100 text-red-700 hover:bg-red-200' 
                                 : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
-                            } ${u.role === 'admin' ? 'cursor-default' : 'cursor-pointer'}`}
-                            title={u.role === 'admin' ? '' : u.deleted ? 'Ativar conta' : 'Desativar conta'}
+                            } ${u?.role === 'admin' ? 'cursor-default' : 'cursor-pointer'}`}
+                            title={u?.role === 'admin' ? '' : u.deleted ? 'Ativar conta' : 'Desativar conta'}
                           >
                             {u.deleted ? (
                               <><UserX className="h-3 w-3" /> Inativa</>
@@ -320,7 +320,7 @@ export default function AdminDashboard({ user, setUser }: { user: any, setUser: 
                           </button>
                         </td>
                         <td className="p-4 text-center space-x-2">
-                          {u.role !== 'admin' && (
+                          {u?.role !== 'admin' && (
                             <>
                               <Dialog open={editingUser?.id === u.id} onOpenChange={(open) => {
                                 if (!open) setEditingUser(null);
@@ -347,7 +347,7 @@ export default function AdminDashboard({ user, setUser }: { user: any, setUser: 
                                       <label className="text-sm font-medium">Novo Login (Email)</label>
                                       <Input value={newEmail} onChange={(e) => setNewEmail(e.target.value)} />
                                     </div>
-                                    {u.role === 'psychologist' && (
+                                    {u?.role === 'psychologist' && (
                                       <div className="space-y-2">
                                         <label className="text-sm font-medium">Comissão PsyQ (%)</label>
                                         <Input type="number" step="0.1" value={newCommission} onChange={(e) => setNewCommission(parseFloat(e.target.value))} />

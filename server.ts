@@ -8,8 +8,8 @@ import { addWeeks, format, parseISO, getYear } from 'date-fns';
 import path from 'path';
 import dns from 'dns';
 import { promisify } from 'util';
-import { sendWelcomeEmail, sendPasswordResetEmail } from './server/email.js';
-import { validateCPF, validateEmail } from './src/utils/validation.js';
+import { sendWelcomeEmail, sendPasswordResetEmail, sendSessionInviteEmail } from './server/email.js';
+import { validateCPF, validateEmail, validateCNPJ } from './src/utils/validation.js';
 import { createPixCharge, simulatePixPayment, listPixCharges } from './server/abacatepay.js';
 
 const resolveMx = promisify(dns.resolveMx);
@@ -175,8 +175,10 @@ app.post('/api/auth/forgot-password', (req, res) => {
 });
 
 app.get('/api/auth/me', authenticate, (req: any, res) => {
-  const user: any = db.prepare('SELECT id, name, email, role, price_per_session, meet_link, psychologist_id, phone, accepted, crp, cpf, pix_key_type FROM users WHERE id = ?').get(req.user.id);
+  const user: any = db.prepare('SELECT id, name, email, role, price_per_session, meet_link, psychologist_id, phone, accepted, crp, cpf, cnpj, pix_key_type FROM users WHERE id = ?').get(req.user.id);
   
+  if (!user) return res.status(404).json({ error: 'User not found' });
+
   if (user.role === 'patient' && user.psychologist_id) {
     const psychologist = db.prepare('SELECT name, email FROM users WHERE id = ?').get(user.psychologist_id) as any;
     if (psychologist) {
@@ -211,10 +213,14 @@ app.post('/api/patients/select-psychologist', authenticate, (req: any, res) => {
 
 // Update Profile (Self)
 app.put('/api/patients/me', authenticate, (req: any, res) => {
-  const { name, phone, password, psychologist_id, crp, cpf, pix_key_type } = req.body;
+  const { name, phone, password, psychologist_id, crp, cpf, cnpj, pix_key_type } = req.body;
   
-  if (cpf !== undefined && !validateCPF(cpf)) {
+  if (cpf !== undefined && cpf !== '' && !validateCPF(cpf)) {
     return res.status(400).json({ error: 'CPF inválido' });
+  }
+
+  if (cnpj !== undefined && cnpj !== '' && !validateCNPJ(cnpj)) {
+    return res.status(400).json({ error: 'CNPJ inválido' });
   }
 
   if (name !== undefined) {
@@ -234,11 +240,20 @@ app.put('/api/patients/me', authenticate, (req: any, res) => {
     db.prepare('UPDATE users SET cpf = ? WHERE id = ?').run(cpf, req.user.id);
   }
 
+  if (cnpj !== undefined && req.user.role === 'psychologist') {
+    db.prepare('UPDATE users SET cnpj = ? WHERE id = ?').run(cnpj, req.user.id);
+  }
+
   if (crp !== undefined && req.user.role === 'psychologist') {
     db.prepare('UPDATE users SET crp = ? WHERE id = ?').run(crp, req.user.id);
   }
   
-  if (pix_key_type !== undefined && ['email', 'cpf', 'phone'].includes(pix_key_type)) {
+  if (pix_key_type !== undefined && ['email', 'cpf', 'phone', 'cnpj'].includes(pix_key_type)) {
+    // Check if the selected key is available
+    if (pix_key_type === 'cnpj' && req.user.role === 'psychologist') {
+      const u = db.prepare('SELECT cnpj FROM users WHERE id = ?').get(req.user.id) as any;
+      if (!u?.cnpj) return res.status(400).json({ error: 'CNPJ não cadastrado' });
+    }
     db.prepare('UPDATE users SET pix_key_type = ? WHERE id = ?').run(pix_key_type, req.user.id);
   }
 
@@ -519,8 +534,29 @@ app.post('/api/appointments', authenticate, (req: any, res) => {
       }
     }
     
-    // Simulate sending email
-    console.log(`[EMAIL MOCK] Sending invite to Psychologist ID ${psychologist_id} and Patient ID ${patient_id} for ${date} at ${start_time}`);
+    // Send session invite email if requested
+    if (req.body.receiveInvite) {
+      const patientUser = db.prepare('SELECT name, email FROM users WHERE id = ?').get(patient_id) as any;
+      const psychologistUser = db.prepare('SELECT name, email, meet_link, session_duration FROM users WHERE id = ?').get(psychologist_id) as any;
+      
+      if (patientUser && psychologistUser) {
+        const sessionDetails = {
+          patientName: patientUser.name,
+          psychologistName: psychologistUser.name,
+          psychologistEmail: psychologistUser.email,
+          patientEmail: patientUser.email,
+          date,
+          startTime: start_time,
+          endTime: end_time,
+          duration: psychologistUser.session_duration,
+          meetLink: psychologistUser.meet_link ? (psychologistUser.meet_link.startsWith('http') ? psychologistUser.meet_link : `https://${psychologistUser.meet_link}`) : '',
+          isRecurring: !!is_recurring,
+          frequency: req.body.frequency
+        };
+        
+        sendSessionInviteEmail([patientUser.email, psychologistUser.email], sessionDetails).catch(console.error);
+      }
+    }
     
     res.json({ message: 'Appointment booked' });
   } catch (err: any) {
@@ -1163,13 +1199,16 @@ app.get('/api/checkout/payment-info', authenticate, (req: any, res) => {
   const user: any = db.prepare('SELECT psychologist_id FROM users WHERE id = ?').get(req.user.id);
   if (!user || !user.psychologist_id) return res.status(404).json({ error: 'Psychologist not found' });
 
-  const psychologist: any = db.prepare('SELECT name, email, cpf, phone, pix_key_type FROM users WHERE id = ?').get(user.psychologist_id);
+  const psychologist: any = db.prepare('SELECT name, email, cpf, phone, cnpj, pix_key_type FROM users WHERE id = ?').get(user.psychologist_id);
   
   if (!psychologist) return res.status(404).json({ error: 'Psychologist not found' });
 
   let pixKey = psychologist.email;
   if (psychologist.pix_key_type === 'cpf') {
     pixKey = psychologist.cpf.replace(/\D/g, '');
+  }
+  if (psychologist.pix_key_type === 'cnpj') {
+    pixKey = (psychologist.cnpj || '').replace(/\D/g, '');
   }
   if (psychologist.pix_key_type === 'phone') {
     let phoneDigits = psychologist.phone.replace(/\D/g, '');

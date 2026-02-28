@@ -1,9 +1,128 @@
 import { Resend } from 'resend';
+import { format, parseISO, addMinutes, getYear, addWeeks } from 'date-fns';
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
 if (!process.env.RESEND_API_KEY) {
   console.warn('RESEND_API_KEY is not defined. Email service will run in MOCK mode.');
+}
+
+export async function sendSessionInviteEmail(to: string[], sessionDetails: any) {
+  if (!resend) {
+    console.log(`[EMAIL MOCK] Session invite to ${to.join(', ')}: ${JSON.stringify(sessionDetails)}`);
+    return;
+  }
+
+  const { patientName, psychologistName, date, startTime, endTime, meetLink, isRecurring, frequency } = sessionDetails;
+
+  const icsContent = generateICSContent(sessionDetails);
+
+  const html = `
+    <div style="font-family: sans-serif; color: #333; max-width: 600px; margin: 0 auto;">
+      <h1 style="color: #1a1a1a;">Convite de Sessão de Terapia</h1>
+      <p>Olá,</p>
+      <p>Uma nova sessão de terapia foi agendada:</p>
+      <div style="background: #f9f9f9; padding: 20px; border-radius: 8px; border: 1px solid #eee; margin: 20px 0;">
+        <p style="margin: 5px 0;"><strong>Paciente:</strong> ${patientName}</p>
+        <p style="margin: 5px 0;"><strong>Terapeuta:</strong> ${psychologistName}</p>
+        <p style="margin: 5px 0;"><strong>Data:</strong> ${date.split('-').reverse().join('/')}</p>
+        <p style="margin: 5px 0;"><strong>Horário:</strong> ${startTime} - ${endTime}</p>
+        ${isRecurring ? `<p style="margin: 5px 0;"><strong>Recorrência:</strong> ${frequency === 'weekly' ? 'Semanal' : 'Quinzenal'}</p>` : ''}
+        <p style="margin: 15px 0 5px 0;"><strong>Link da Reunião:</strong> <br /><a href="${meetLink}" style="color: #1a1a1a; font-weight: bold;">${meetLink}</a></p>
+      </div>
+      <p>O arquivo de convite (.ics) está em anexo para que você possa adicionar ao seu calendário.</p>
+      <br />
+      <p>Atenciosamente,<br />Equipe PsyQ</p>
+    </div>
+  `;
+
+  try {
+    const from = process.env.EMAIL_FROM || 'PsyQ <onboarding@resend.dev>';
+    const { data, error } = await resend.emails.send({
+      from,
+      to,
+      subject: `Convite: Sessão de Terapia - ${date.split('-').reverse().join('/')} às ${startTime}`,
+      html,
+      attachments: [
+        {
+          filename: 'convite_sessao.ics',
+          content: Buffer.from(icsContent).toString('base64'),
+        },
+      ],
+    });
+
+    if (error) {
+      console.error('Resend error sending session invite:', error);
+    } else {
+      console.log('Session invite email sent successfully:', data?.id);
+    }
+  } catch (error) {
+    console.error('Unexpected error sending session invite:', error);
+  }
+}
+
+function generateICSContent(details: any) {
+  const { date, startTime: startTimeStr, duration, isRecurring, frequency, psychologistName, psychologistEmail, patientEmail, meetLink } = details;
+  
+  const startDateTime = parseISO(`${date}T${startTimeStr}`);
+  const endDateTime = addMinutes(startDateTime, duration || 50);
+  
+  const getUTCString = (d: Date) => d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+  
+  const dtStart = getUTCString(startDateTime);
+  const dtEnd = getUTCString(endDateTime);
+  const now = getUTCString(new Date());
+  
+  const title = "Sessão de Terapia";
+  const description = `Sessão com ${psychologistName}.\\nLink: ${meetLink}`;
+  const location = meetLink;
+  const organizer = `MAILTO:${psychologistEmail || 'contato@psyq.com'}`;
+  const attendee = `MAILTO:${patientEmail}`;
+  
+  let rrule = '';
+  if (isRecurring) {
+    const intervalWeeks = frequency === 'biweekly' ? 2 : 1;
+    const currentYear = getYear(startDateTime);
+    
+    let nextDate = addWeeks(startDateTime, intervalWeeks);
+    let count = 1;
+    
+    while (getYear(nextDate) === currentYear) {
+      count++;
+      nextDate = addWeeks(nextDate, intervalWeeks);
+    }
+
+    if (frequency === 'weekly') {
+      rrule = `RRULE:FREQ=WEEKLY;COUNT=${count}`;
+    } else if (frequency === 'biweekly') {
+      rrule = `RRULE:FREQ=WEEKLY;INTERVAL=2;COUNT=${count}`;
+    }
+  }
+
+  const icsLines = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//PsyQ//Terapia//PT',
+    'CALSCALE:GREGORIAN',
+    'METHOD:REQUEST',
+    'BEGIN:VEVENT',
+    `UID:${Math.random().toString(36).substring(2)}@psyq.com`,
+    `DTSTAMP:${now}`,
+    `DTSTART:${dtStart}`,
+    `DTEND:${dtEnd}`,
+    `SUMMARY:${title}`,
+    `DESCRIPTION:${description}`,
+    `LOCATION:${location}`,
+    `ORGANIZER;CN=${psychologistName}:${organizer}`,
+    `ATTENDEE;RSVP=TRUE;CN=Paciente:${attendee}`,
+    rrule,
+    'STATUS:CONFIRMED',
+    'SEQUENCE:0',
+    'END:VEVENT',
+    'END:VCALENDAR'
+  ].filter(Boolean);
+
+  return icsLines.join('\r\n');
 }
 
 export async function sendWelcomeEmail(to: string, name: string, role: string) {

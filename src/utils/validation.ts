@@ -62,3 +62,53 @@ export function formatPhone(phone: string): string {
   if (val.length > 2) return val.replace(/(\d{2})(\d{0,5})/, '($1) $2');
   return val;
 }
+
+export function validateCNPJ(cnpj: string): boolean {
+  const cleanCNPJ = cnpj.replace(/\D/g, '');
+
+  if (cleanCNPJ.length !== 14) return false;
+
+  // Check for known invalid CNPJs
+  if (/^(\d)\1{13}$/.test(cleanCNPJ)) return false;
+
+  let size = cleanCNPJ.length - 2;
+  let numbers = cleanCNPJ.substring(0, size);
+  const digits = cleanCNPJ.substring(size);
+  let sum = 0;
+  let pos = size - 7;
+
+  for (let i = size; i >= 1; i--) {
+    sum += parseInt(numbers.charAt(size - i)) * pos--;
+    if (pos < 2) pos = 9;
+  }
+
+  let result = (sum % 11 < 2) ? 0 : 11 - (sum % 11);
+  if (result !== parseInt(digits.charAt(0))) return false;
+
+  size = size + 1;
+  numbers = cleanCNPJ.substring(0, size);
+  sum = 0;
+  pos = size - 7;
+
+  for (let i = size; i >= 1; i--) {
+    sum += parseInt(numbers.charAt(size - i)) * pos--;
+    if (pos < 2) pos = 9;
+  }
+
+  result = (sum % 11 < 2) ? 0 : 11 - (sum % 11);
+  if (result !== parseInt(digits.charAt(1))) return false;
+
+  return true;
+}
+
+export function formatCNPJ(cnpj: string): string {
+  let val = cnpj.replace(/\D/g, '');
+  if (val.length > 14) val = val.slice(0, 14);
+  
+  if (val.length > 12) return val.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5');
+  if (val.length > 8) return val.replace(/(\d{2})(\d{3})(\d{3})(\d{1,4})/, '$1.$2.$3/$4');
+  if (val.length > 5) return val.replace(/(\d{2})(\d{3})(\d{1,3})/, '$1.$2.$3');
+  if (val.length > 2) return val.replace(/(\d{2})(\d{1,3})/, '$1.$2');
+  
+  return val;
+}

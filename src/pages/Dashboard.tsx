@@ -38,6 +38,7 @@ export default function Dashboard({ user }: { user: any }) {
   const [selectedPatientForBooking, setSelectedPatientForBooking] = useState('');
   const [bookingError, setBookingError] = useState('');
   const [bookingSuccess, setBookingSuccess] = useState('');
+  const [receiveInvite, setReceiveInvite] = useState(false);
 
   // Platform Checkout State
   const [unpaidPlatformMonths, setUnpaidPlatformMonths] = useState<any[]>([]);
@@ -256,6 +257,7 @@ export default function Dashboard({ user }: { user: any }) {
           is_recurring: isRecurring,
           frequency: isRecurring ? frequency : undefined,
           patient_id: selectedPatientForBooking,
+          receiveInvite,
           client_date: format(new Date(), 'yyyy-MM-dd'),
           client_time: format(new Date(), 'HH:mm')
         }),
@@ -737,6 +739,19 @@ export default function Dashboard({ user }: { user: any }) {
                         />
                         <label htmlFor="recurring" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
                           Repetir agendamento
+                        </label>
+                      </div>
+
+                      <div className="flex items-center space-x-2 pt-2 border-t border-stone-100">
+                        <input
+                          type="checkbox"
+                          id="receiveInvite"
+                          checked={receiveInvite}
+                          onChange={(e) => setReceiveInvite(e.target.checked)}
+                          className="h-4 w-4 rounded border-stone-300 text-stone-900 focus:ring-stone-900"
+                        />
+                        <label htmlFor="receiveInvite" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                          Receber invite por e-mail
                         </label>
                       </div>
 

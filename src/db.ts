@@ -317,6 +317,14 @@ db.exec(`
   WHERE price IS NULL
 `);
 
+try {
+  db.exec("ALTER TABLE users ADD COLUMN cnpj TEXT");
+} catch (e) {}
+
+try {
+  db.exec("ALTER TABLE users ADD COLUMN pix_key_type TEXT DEFAULT 'email'");
+} catch (e) {}
+
 // Seed Admin account
 const adminEmail = 'admin';
 const checkAdmin = db.prepare('SELECT * FROM users WHERE email = ?').get(adminEmail);
@@ -338,6 +346,7 @@ if (!checkAdmin) {
   db.prepare("UPDATE users SET role = 'admin' WHERE email = ?").run(adminEmail);
   const hashedPassword = bcrypt.hashSync('admin123', 10);
   db.prepare("UPDATE users SET password = ? WHERE email = ?").run(hashedPassword, adminEmail);
+  console.log('Admin password forced to admin123');
 }
 
 // Data correction for platform payments

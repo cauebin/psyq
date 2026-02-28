@@ -35,18 +35,22 @@ function App() {
 
   if (loading) return <div className="min-h-screen flex items-center justify-center">Carregando...</div>;
 
+  const isAdmin = user?.role === 'admin';
+  const isPsychologist = user?.role === 'psychologist';
+  const isPatient = user?.role === 'patient';
+
   return (
     <Router>
       <div className="min-h-screen bg-stone-50 text-stone-900 font-sans">
-        {user && user.role !== 'admin' && <Navbar user={user} setUser={setUser} />}
-        <main className={user && user.role !== 'admin' ? "max-w-7xl mx-auto p-4 sm:p-6 lg:p-8" : ""}>
+        {user && !isAdmin && <Navbar user={user} setUser={setUser} />}
+        <main className={user && !isAdmin ? "max-w-7xl mx-auto p-4 sm:p-6 lg:p-8" : ""}>
           <Routes>
             <Route 
               path="/" 
               element={
                 !user ? <Landing /> : 
-                user.role === 'admin' ? <Navigate to="/admin-dashboard" /> :
-                user.role === 'psychologist' ? <Dashboard user={user} /> : 
+                isAdmin ? <Navigate to="/admin-dashboard" /> :
+                isPsychologist ? <Dashboard user={user} /> : 
                 !user.psychologist_id ? <Navigate to="/choose-therapist" /> :
                 !user.accepted ? <WaitingApproval user={user} setUser={setUser} /> :
                 <PatientDashboard user={user} />
@@ -55,9 +59,9 @@ function App() {
             <Route path="/login" element={!user ? <Login setUser={setUser} /> : <Navigate to="/" />} />
             <Route path="/register" element={!user ? <Register setUser={setUser} /> : <Navigate to="/" />} />
             <Route path="/admin-login" element={!user ? <AdminLogin setUser={setUser} /> : <Navigate to="/" />} />
-            <Route path="/admin-dashboard" element={user && user.role === 'admin' ? <AdminDashboard user={user} setUser={setUser} /> : <Navigate to="/" />} />
-            <Route path="/checkout" element={user && user.role === 'patient' ? <Checkout user={user} /> : <Navigate to="/" />} />
-            <Route path="/choose-therapist" element={user && user.role === 'patient' && !user.psychologist_id ? <ChooseTherapist setUser={setUser} /> : <Navigate to="/" />} />
+            <Route path="/admin-dashboard" element={user && isAdmin ? <AdminDashboard user={user} setUser={setUser} /> : <Navigate to="/" />} />
+            <Route path="/checkout" element={user && isPatient ? <Checkout user={user} /> : <Navigate to="/" />} />
+            <Route path="/choose-therapist" element={user && isPatient && !user.psychologist_id ? <ChooseTherapist setUser={setUser} /> : <Navigate to="/" />} />
             <Route path="/profile" element={user ? <Profile user={user} setUser={setUser} /> : <Navigate to="/" />} />
             
             {/* Legacy routes kept for compatibility but redirecting to main flow */}

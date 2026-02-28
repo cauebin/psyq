@@ -87,74 +87,6 @@ export default function PatientDashboard({ user }: { user: any }) {
     return `https://${link}`;
   };
 
-  const generateICS = (date: Date, startTimeStr: string, isRecurring: boolean, frequency: string) => {
-    const startTime = parseISO(`${format(date, 'yyyy-MM-dd')}T${startTimeStr}`);
-    const endTime = addMinutes(startTime, settings.session_duration || 50);
-    
-    const getUTCString = (d: Date) => d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
-    
-    const dtStart = getUTCString(startTime);
-    const dtEnd = getUTCString(endTime);
-    const now = getUTCString(new Date());
-    
-    const title = "Sessão de Terapia";
-    const description = `Sessão com ${currentUser.psychologist_name || 'Terapeuta'}.\\nLink: ${getMeetLink(currentUser.meet_link)}`;
-    const location = getMeetLink(currentUser.meet_link);
-    const organizer = `MAILTO:${currentUser.psychologist_email || ''}`;
-    const attendee = `MAILTO:${currentUser.email || ''}`;
-    
-    let rrule = '';
-    if (isRecurring) {
-      const intervalWeeks = frequency === 'biweekly' ? 2 : 1;
-      const currentYear = getYear(date);
-      
-      let nextDate = addWeeks(date, intervalWeeks);
-      let count = 1;
-      
-      while (getYear(nextDate) === currentYear) {
-        count++;
-        nextDate = addWeeks(nextDate, intervalWeeks);
-      }
-
-      if (frequency === 'weekly') {
-        rrule = `RRULE:FREQ=WEEKLY;COUNT=${count}`;
-      } else if (frequency === 'biweekly') {
-        rrule = `RRULE:FREQ=WEEKLY;INTERVAL=2;COUNT=${count}`;
-      }
-    }
-
-    const icsContent = [
-      'BEGIN:VCALENDAR',
-      'VERSION:2.0',
-      'PRODID:-//PsyQ//Terapia//PT',
-      'CALSCALE:GREGORIAN',
-      'METHOD:REQUEST',
-      'BEGIN:VEVENT',
-      `UID:${Math.random().toString(36).substring(2)}@psyq.com`,
-      `DTSTAMP:${now}`,
-      `DTSTART:${dtStart}`,
-      `DTEND:${dtEnd}`,
-      `SUMMARY:${title}`,
-      `DESCRIPTION:${description}`,
-      `LOCATION:${location}`,
-      `ORGANIZER:${organizer}`,
-      `ATTENDEE;RSVP=TRUE:${attendee}`,
-      rrule,
-      'STATUS:CONFIRMED',
-      'SEQUENCE:0',
-      'END:VEVENT',
-      'END:VCALENDAR'
-    ].filter(Boolean).join('\r\n');
-
-    const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
-    const link = document.createElement('a');
-    link.href = window.URL.createObjectURL(blob);
-    link.setAttribute('download', `sessao_terapia_${format(date, 'yyyyMMdd')}.ics`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
   const handleBookAppointment = async () => {
     if (!selectedDate || !selectedTime) {
       setError('Selecione uma data e horário.');
@@ -177,6 +109,7 @@ export default function PatientDashboard({ user }: { user: any }) {
           end_time: addMinutesToTime(selectedTime, settings.session_duration),
           is_recurring: isRecurring,
           frequency: isRecurring ? frequency : undefined,
+          receiveInvite,
           client_date: format(new Date(), 'yyyy-MM-dd'),
           client_time: format(new Date(), 'HH:mm')
         }),
@@ -184,10 +117,6 @@ export default function PatientDashboard({ user }: { user: any }) {
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-
-      if (receiveInvite) {
-        generateICS(selectedDate, selectedTime, isRecurring, frequency);
-      }
 
       setSuccess('Agendamento realizado com sucesso!');
       setError('');
@@ -600,7 +529,7 @@ export default function PatientDashboard({ user }: { user: any }) {
                         className="h-4 w-4 rounded border-stone-300 text-stone-900 focus:ring-stone-900"
                       />
                       <label htmlFor="receiveInvite" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
-                        Receber invite (.ics)
+                        Receber invite por e-mail
                       </label>
                     </div>
                   </div>

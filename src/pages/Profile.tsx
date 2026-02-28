@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { User, Phone, Lock, HeartHandshake, ArrowLeft, FileText, Trash2 } from 'lucide-react';
-import { validateCPF, formatCPF, formatPhone } from '@/utils/validation';
+import { validateCPF, formatCPF, formatPhone, validateCNPJ, formatCNPJ } from '@/utils/validation';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -21,6 +21,7 @@ export default function Profile({ user, setUser }: { user: any, setUser: any }) 
   const [name, setName] = useState(user.name || '');
   const [phone, setPhone] = useState(formatPhone(user.phone || ''));
   const [cpf, setCpf] = useState(formatCPF(user.cpf || ''));
+  const [cnpj, setCnpj] = useState(formatCNPJ(user.cnpj || ''));
   const [crp, setCrp] = useState(user.crp || '');
   const [pixKeyType, setPixKeyType] = useState(user.pix_key_type || 'email');
   const [password, setPassword] = useState('');
@@ -68,11 +69,17 @@ export default function Profile({ user, setUser }: { user: any, setUser: any }) 
       return;
     }
 
+    if (cnpj && !validateCNPJ(cnpj)) {
+      setError('CNPJ inválido. Por favor, verifique os números.');
+      return;
+    }
+
     const cpfClean = cpf.replace(/\D/g, '');
+    const cnpjClean = cnpj.replace(/\D/g, '');
     const phoneClean = phone.replace(/\D/g, '');
     const token = localStorage.getItem('token');
     try {
-      const body: any = { name, phone: phoneClean, cpf: cpfClean };
+      const body: any = { name, phone: phoneClean, cpf: cpfClean, cnpj: cnpjClean };
       if (password) body.password = password;
       if (user.role === 'patient' && selectedPsychologist && selectedPsychologist !== user.psychologist_id) {
         body.psychologist_id = selectedPsychologist;
@@ -204,6 +211,20 @@ export default function Profile({ user, setUser }: { user: any, setUser: any }) 
                 </div>
 
                 <div className="space-y-2">
+                  <label className="text-sm font-medium">CNPJ (Opcional)</label>
+                  <div className="relative">
+                    <FileText className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 h-4 w-4" />
+                    <Input 
+                      className="pl-10" 
+                      placeholder="00.000.000/0000-00" 
+                      value={cnpj}
+                      onChange={(e) => setCnpj(formatCNPJ(e.target.value))}
+                    />
+                  </div>
+                  <p className="text-xs text-stone-500">Se preenchido, você poderá usar o CNPJ como chave PIX.</p>
+                </div>
+
+                <div className="space-y-2">
                   <label className="text-sm font-medium">Chave PIX Preferencial</label>
                   <select 
                     className="flex h-10 w-full rounded-md border border-stone-200 bg-white px-3 py-2 text-sm"
@@ -213,6 +234,7 @@ export default function Profile({ user, setUser }: { user: any, setUser: any }) 
                     <option value="email">E-mail ({user.email})</option>
                     <option value="cpf">CPF ({cpf || 'Não informado'})</option>
                     <option value="phone">Celular ({phone || 'Não informado'})</option>
+                    {cnpj && <option value="cnpj">CNPJ ({cnpj})</option>}
                   </select>
                   <p className="text-xs text-stone-500">Esta chave será usada para gerar o QR Code de pagamento para seus pacientes.</p>
                 </div>
