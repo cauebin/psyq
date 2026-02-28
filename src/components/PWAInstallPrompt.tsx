@@ -24,9 +24,21 @@ export default function PWAInstallPrompt() {
     const isMacSafariDevice = isMac && isSafari && !isIosDevice;
     setIsMacSafari(isMacSafariDevice);
 
-    // Check if already installed
-    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone;
+    // Check if running in standalone mode (app window)
+    const isStandalone = 
+      window.matchMedia('(display-mode: standalone)').matches || 
+      (window.navigator as any).standalone || 
+      document.referrer.includes('android-app://');
+
     if (isStandalone) return;
+
+    // Check if previously marked as installed
+    const isInstalledLocally = localStorage.getItem('pwa_installed') === 'true';
+    if (isInstalledLocally) return;
+
+    // Check dismissal count (Limit to 4 times)
+    const dismissCount = parseInt(localStorage.getItem('pwa_prompt_dismiss_count') || '0');
+    if (dismissCount >= 4) return;
 
     // If the event fired before React mounted, grab it from the window object
     if ((window as any).deferredPWAInstallPrompt) {
@@ -43,7 +55,14 @@ export default function PWAInstallPrompt() {
       setTimeout(() => setShowPrompt(true), 3000);
     };
 
+    // Handle successful installation event (Chrome/Edge)
+    const handleAppInstalled = () => {
+      localStorage.setItem('pwa_installed', 'true');
+      setShowPrompt(false);
+    };
+
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleAppInstalled);
 
     // Show iOS or Mac Safari prompt if not installed
     if ((isIosDevice || isMacSafariDevice) && !isStandalone) {
@@ -52,6 +71,7 @@ export default function PWAInstallPrompt() {
 
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
     };
   }, []);
 
@@ -64,10 +84,13 @@ export default function PWAInstallPrompt() {
     if (outcome === 'accepted') {
       setDeferredPrompt(null);
       setShowPrompt(false);
+      localStorage.setItem('pwa_installed', 'true');
     }
   };
 
   const handleClose = () => {
+    const currentCount = parseInt(localStorage.getItem('pwa_prompt_dismiss_count') || '0');
+    localStorage.setItem('pwa_prompt_dismiss_count', (currentCount + 1).toString());
     setShowPrompt(false);
   };
 
