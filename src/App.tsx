@@ -11,6 +11,7 @@ import AdminLogin from './pages/AdminLogin';
 import AdminDashboard from './pages/AdminDashboard';
 import Checkout from './pages/Checkout';
 import Navbar from './components/Navbar';
+import PWAInstallPrompt from './components/PWAInstallPrompt';
 import { useEffect, useState } from 'react';
 
 function App() {
@@ -42,6 +43,7 @@ function App() {
   return (
     <Router>
       <div className="min-h-screen bg-stone-50 text-stone-900 font-sans">
+        <PWAInstallPrompt />
         {user && !isAdmin && <Navbar user={user} setUser={setUser} />}
         <main className={user && !isAdmin ? "max-w-7xl mx-auto p-4 sm:p-6 lg:p-8" : ""}>
           <Routes>

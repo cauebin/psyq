@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import cors from 'cors';
 import { createServer as createViteServer } from 'vite';
 import db from './src/db.js';
 import bcrypt from 'bcryptjs';
@@ -40,6 +41,7 @@ const PORT = Number(process.env.PORT) || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key';
 
 app.use(express.json());
+app.use(cors());
 
 // Authentication Middleware
 const authenticate = (req: any, res: any, next: any) => {
