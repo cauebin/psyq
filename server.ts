@@ -761,6 +761,13 @@ app.post('/api/checkout/pay', authenticate, (req: any, res) => {
 
   const likeDate = `${year}-${month.toString().padStart(2, '0')}-%`;
   
+  // Calculate amount to be paid BEFORE updating
+  const amountData = db.prepare(`
+    SELECT SUM(COALESCE(price, 0)) as total FROM appointments 
+    WHERE patient_id = ? AND date LIKE ? AND status = 'scheduled' AND payment_status = 'pending'
+  `).get(req.user.id, likeDate) as any;
+  const currentTransactionAmount = amountData?.total || 0;
+
   db.prepare(`
     UPDATE appointments 
     SET payment_status = 'paid' 
@@ -770,18 +777,14 @@ app.post('/api/checkout/pay', authenticate, (req: any, res) => {
   // Send confirmation email
   try {
     const patient = db.prepare('SELECT name, email, psychologist_id FROM users WHERE id = ?').get(req.user.id) as any;
-    if (patient && patient.psychologist_id) {
+    if (patient && patient.psychologist_id && currentTransactionAmount > 0) {
       const psychologist = db.prepare('SELECT name, email FROM users WHERE id = ?').get(patient.psychologist_id) as any;
-      const amountData = db.prepare(`
-        SELECT SUM(price) as total FROM appointments 
-        WHERE patient_id = ? AND date LIKE ? AND payment_status = 'paid'
-      `).get(req.user.id, likeDate) as any;
-
+      
       if (psychologist) {
         sendPaymentConfirmationEmail([patient.email, psychologist.email], {
           payerName: patient.name,
           receiverName: psychologist.name,
-          amount: amountData?.total || 0,
+          amount: currentTransactionAmount,
           date: new Date().toISOString().split('T')[0],
           description: `Sessões de Terapia - ${month}/${year}`,
           type: 'patient_to_therapist'
