@@ -266,7 +266,7 @@ export default function AdminDashboard({ user, setUser }: { user: any, setUser: 
                       <th className="p-4 font-semibold text-stone-700">CPF</th>
                       <th className="p-4 font-semibold text-stone-700">Celular</th>
                       <th className="p-4 font-semibold text-stone-700">Login (Email)</th>
-                      <th className="p-4 font-semibold text-stone-700">Comissão (%)</th>
+                      <th className="p-4 font-semibold text-stone-700">Taxa de Serviço (%)</th>
                       <th className="p-4 font-semibold text-stone-700">Status</th>
                       <th className="p-4 font-semibold text-stone-700 text-center">Ações</th>
                     </tr>
@@ -356,7 +356,7 @@ export default function AdminDashboard({ user, setUser }: { user: any, setUser: 
                                     </div>
                                     {u?.role === 'psychologist' && (
                                       <div className="space-y-2">
-                                        <label className="text-sm font-medium">Comissão PsyQ (%)</label>
+                                        <label className="text-sm font-medium">Taxa de Serviço PsyQ (%)</label>
                                         <Input type="number" step="0.1" value={newCommission} onChange={(e) => setNewCommission(parseFloat(e.target.value))} />
                                       </div>
                                     )}
@@ -633,8 +633,8 @@ export default function AdminDashboard({ user, setUser }: { user: any, setUser: 
           <TabsContent value="revenue" className="space-y-8">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
               <div>
-                <h2 className="text-2xl font-bold text-stone-900">Faturamento da Plataforma (Comissões)</h2>
-                <p className="text-stone-500">Acompanhe as comissões devidas pelos terapeutas.</p>
+                <h2 className="text-2xl font-bold text-stone-900">Faturamento da Plataforma (Taxas de Serviço)</h2>
+                <p className="text-stone-500">Acompanhe as taxas de serviço devidas pelos terapeutas.</p>
               </div>
               <div className="flex items-center gap-2 bg-white p-2 rounded-lg border border-stone-200 shadow-sm">
                 <Calendar className="h-4 w-4 text-stone-400 ml-2" />
@@ -682,7 +682,7 @@ export default function AdminDashboard({ user, setUser }: { user: any, setUser: 
                 <CardContent className="p-6">
                   <div className="flex justify-between items-start">
                     <div>
-                      <p className="text-stone-400 text-xs font-medium uppercase tracking-wider">Total em Comissões (Mês)</p>
+                      <p className="text-stone-400 text-xs font-medium uppercase tracking-wider">Total em Taxas de Serviço (Mês)</p>
                       <h3 className="text-3xl font-bold mt-1">
                         {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(
                           commissionData.reduce((acc, curr) => acc + curr.commission_amount, 0)
@@ -699,7 +699,7 @@ export default function AdminDashboard({ user, setUser }: { user: any, setUser: 
                 <CardContent className="p-6">
                   <div className="flex justify-between items-start">
                     <div>
-                      <p className="text-stone-500 text-xs font-medium uppercase tracking-wider">Comissões Recebidas</p>
+                      <p className="text-stone-500 text-xs font-medium uppercase tracking-wider">Taxas Recebidas</p>
                       <h3 className="text-3xl font-bold mt-1 text-emerald-600">
                         {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(
                           commissionData.filter(c => c.status === 'paid').reduce((acc, curr) => acc + curr.paid_amount, 0)
@@ -716,7 +716,7 @@ export default function AdminDashboard({ user, setUser }: { user: any, setUser: 
                 <CardContent className="p-6">
                   <div className="flex justify-between items-start">
                     <div>
-                      <p className="text-stone-500 text-xs font-medium uppercase tracking-wider">Comissões Pendentes</p>
+                      <p className="text-stone-500 text-xs font-medium uppercase tracking-wider">Taxas Pendentes</p>
                       <h3 className="text-3xl font-bold mt-1 text-red-600">
                         {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(
                           commissionData.filter(c => c.status === 'pending').reduce((acc, curr) => acc + curr.commission_amount, 0)
@@ -733,8 +733,8 @@ export default function AdminDashboard({ user, setUser }: { user: any, setUser: 
 
             <Card className="border-stone-200">
               <CardHeader>
-                <CardTitle className="text-lg">Relatório de Comissões por Terapeuta</CardTitle>
-                <CardDescription>Acompanhe o faturamento de cada profissional e a respectiva comissão da PsyQ.</CardDescription>
+                <CardTitle className="text-lg">Relatório de Taxas de Serviço por Terapeuta</CardTitle>
+                <CardDescription>Acompanhe o faturamento de cada profissional e a respectiva taxa de serviço da PsyQ.</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="overflow-x-auto">
@@ -743,8 +743,8 @@ export default function AdminDashboard({ user, setUser }: { user: any, setUser: 
                       <tr className="bg-stone-50 border-b border-stone-200">
                         <th className="p-3 font-semibold text-stone-700 text-sm">Terapeuta</th>
                         <th className="p-3 font-semibold text-stone-700 text-sm text-right">Faturamento (Pago)</th>
-                        <th className="p-3 font-semibold text-stone-700 text-sm text-center">Comissão (%)</th>
-                        <th className="p-3 font-semibold text-stone-700 text-sm text-right">Valor Comissão</th>
+                        <th className="p-3 font-semibold text-stone-700 text-sm text-center">Taxa (%)</th>
+                        <th className="p-3 font-semibold text-stone-700 text-sm text-right">Valor Taxa</th>
                         <th className="p-3 font-semibold text-stone-700 text-sm text-center">Status</th>
                         <th className="p-3 font-semibold text-stone-700 text-sm">Data Pagamento</th>
                         <th className="p-3 font-semibold text-stone-700 text-sm">ID Pagamento</th>
@@ -786,7 +786,7 @@ export default function AdminDashboard({ user, setUser }: { user: any, setUser: 
                     {commissionData.length > 0 && (
                       <tfoot>
                         <tr className="bg-stone-900 text-white font-bold">
-                          <td colSpan={3} className="p-3 text-right uppercase text-xs tracking-wider">Total de Comissões no Período</td>
+                          <td colSpan={3} className="p-3 text-right uppercase text-xs tracking-wider">Total de Taxas no Período</td>
                           <td className="p-3 text-right">
                             {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(
                               commissionData.reduce((acc, curr) => acc + curr.commission_amount, 0)

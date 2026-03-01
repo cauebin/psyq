@@ -203,3 +203,91 @@ export async function sendPasswordResetEmail(to: string, name: string, newPasswo
     console.error('Unexpected error sending password reset email:', error);
   }
 }
+
+export async function sendPaymentConfirmationEmail(to: string[], details: any) {
+  if (!resend) {
+    console.log(`[EMAIL MOCK] Payment confirmation to ${to.join(', ')}: ${JSON.stringify(details)}`);
+    return;
+  }
+
+  const { 
+    payerName, 
+    receiverName, 
+    amount, 
+    date, 
+    description, 
+    transactionId, 
+    type // 'patient_to_therapist' or 'therapist_to_platform'
+  } = details;
+
+  const formattedAmount = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(amount);
+  const formattedDate = date.split('-').reverse().join('/');
+
+  const title = type === 'patient_to_therapist' ? 'Recibo de Pagamento de Sessão' : 'Recibo de Pagamento de Taxa de Serviço';
+  const subject = `Confirmação de Pagamento - ${formattedAmount}`;
+
+  const html = `
+    <div style="font-family: sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 12px; overflow: hidden;">
+      <div style="background: #1a1a1a; color: white; padding: 30px; text-align: center;">
+        <h1 style="margin: 0; font-size: 24px;">${title}</h1>
+        <p style="margin: 10px 0 0 0; opacity: 0.8;">Pagamento concluído com sucesso</p>
+      </div>
+      <div style="padding: 30px;">
+        <p>Olá,</p>
+        <p>Confirmamos o recebimento do pagamento via PIX referente a <strong>${description}</strong>.</p>
+        
+        <div style="background: #f9f9f9; padding: 20px; border-radius: 8px; margin: 20px 0;">
+          <table style="width: 100%; border-collapse: collapse;">
+            <tr>
+              <td style="padding: 8px 0; color: #666;">Pagador:</td>
+              <td style="padding: 8px 0; font-weight: bold; text-align: right;">${payerName}</td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0; color: #666;">Recebedor:</td>
+              <td style="padding: 8px 0; font-weight: bold; text-align: right;">${receiverName}</td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0; color: #666;">Data:</td>
+              <td style="padding: 8px 0; font-weight: bold; text-align: right;">${formattedDate}</td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0; color: #666;">Valor:</td>
+              <td style="padding: 8px 0; font-weight: bold; text-align: right; color: #059669; font-size: 18px;">${formattedAmount}</td>
+            </tr>
+            ${transactionId ? `
+            <tr>
+              <td style="padding: 8px 0; color: #666;">ID da Transação:</td>
+              <td style="padding: 8px 0; font-family: monospace; font-size: 12px; text-align: right;">${transactionId}</td>
+            </tr>
+            ` : ''}
+          </table>
+        </div>
+        
+        <p style="font-size: 14px; color: #666; text-align: center; margin-top: 30px;">
+          Este é um e-mail automático de confirmação. Guarde este comprovante para seus registros.
+        </p>
+      </div>
+      <div style="background: #f4f4f4; padding: 20px; text-align: center; font-size: 12px; color: #999;">
+        &copy; ${new Date().getFullYear()} PsyQ - Plataforma para Terapeutas
+      </div>
+    </div>
+  `;
+
+  try {
+    const from = process.env.EMAIL_FROM || 'PsyQ <onboarding@resend.dev>';
+    const { data, error } = await resend.emails.send({
+      from,
+      to,
+      subject,
+      html,
+    });
+
+    if (error) {
+      console.error('Resend error sending payment confirmation:', error);
+    } else {
+      console.log('Payment confirmation email sent successfully:', data?.id);
+    }
+  } catch (error) {
+    console.error('Unexpected error sending payment confirmation:', error);
+  }
+}

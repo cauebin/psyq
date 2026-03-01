@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
-import { User, Phone, Lock, HeartHandshake, ArrowLeft, FileText, Trash2 } from 'lucide-react';
+import { User, Phone, Lock, HeartHandshake, ArrowLeft, FileText, Trash2, Eye, EyeOff } from 'lucide-react';
 import { validateCPF, formatCPF, formatPhone, validateCNPJ, formatCNPJ } from '@/utils/validation';
 import {
   AlertDialog,
@@ -25,7 +25,9 @@ export default function Profile({ user, setUser }: { user: any, setUser: any }) 
   const [crp, setCrp] = useState(user.crp || '');
   const [pixKeyType, setPixKeyType] = useState(user.pix_key_type || 'email');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [psychologists, setPsychologists] = useState<any[]>([]);
   const [selectedPsychologist, setSelectedPsychologist] = useState(user.psychologist_id || '');
   const [message, setMessage] = useState('');
@@ -249,12 +251,19 @@ export default function Profile({ user, setUser }: { user: any, setUser: any }) 
                   <div className="relative">
                     <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 h-4 w-4" />
                     <Input 
-                      type="password" 
-                      className="pl-10" 
+                      type={showPassword ? "text" : "password"} 
+                      className="pl-10 pr-10" 
                       placeholder="Deixe em branco para manter a atual" 
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                     />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600"
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
                   </div>
                 </div>
                 <div className="space-y-2">
@@ -262,12 +271,19 @@ export default function Profile({ user, setUser }: { user: any, setUser: any }) 
                   <div className="relative">
                     <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 h-4 w-4" />
                     <Input 
-                      type="password" 
-                      className="pl-10" 
+                      type={showConfirmPassword ? "text" : "password"} 
+                      className="pl-10 pr-10" 
                       placeholder="Confirme a nova senha" 
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
                     />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600"
+                    >
+                      {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
                   </div>
                 </div>
               </div>

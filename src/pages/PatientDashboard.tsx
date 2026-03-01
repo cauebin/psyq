@@ -14,7 +14,7 @@ export default function PatientDashboard({ user }: { user: any }) {
   const [busySlots, setBusySlots] = useState<any[]>([]);
   const [availability, setAvailability] = useState<any[]>([]);
   const [report, setReport] = useState<any>(null);
-  const [settings, setSettings] = useState<any>({ session_duration: 90, work_on_holidays: 0 });
+  const [settings, setSettings] = useState<any>({ session_duration: 50, interval_duration: 10, work_on_holidays: 0 });
   const [holidays, setHolidays] = useState<any[]>([]);
   const [absences, setAbsences] = useState<any[]>([]);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
@@ -249,8 +249,8 @@ export default function PatientDashboard({ user }: { user: any }) {
           slots.push(current);
         }
 
-        // Increment by duration
-        current = slotEnd;
+        // Increment by duration + interval
+        current = addMinutesToTime(current, settings.session_duration + (settings.interval_duration || 0));
       }
     });
 

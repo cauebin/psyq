@@ -9,7 +9,7 @@ import { addWeeks, format, parseISO, getYear } from 'date-fns';
 import path from 'path';
 import dns from 'dns';
 import { promisify } from 'util';
-import { sendWelcomeEmail, sendPasswordResetEmail, sendSessionInviteEmail } from './server/email.js';
+import { sendWelcomeEmail, sendPasswordResetEmail, sendSessionInviteEmail, sendPaymentConfirmationEmail } from './server/email.js';
 import { validateCPF, validateEmail, validateCNPJ } from './src/utils/validation.js';
 import { createPixCharge, getPixCharge } from './server/abacatepay.js';
 
@@ -419,18 +419,22 @@ app.put('/api/patients/:id', authenticate, (req: any, res) => {
 // Settings
 app.get('/api/settings', authenticate, (req: any, res) => {
   const targetId = req.user.role === 'psychologist' ? req.user.id : req.user.psychologist_id;
-  if (!targetId) return res.json({ session_duration: 90, work_on_holidays: 0 });
+  if (!targetId) return res.json({ session_duration: 50, interval_duration: 10, work_on_holidays: 0 });
   
-  const settings = db.prepare('SELECT session_duration, work_on_holidays FROM users WHERE id = ?').get(targetId);
-  res.json(settings || { session_duration: 90, work_on_holidays: 0 });
+  const settings = db.prepare('SELECT session_duration, interval_duration, work_on_holidays FROM users WHERE id = ?').get(targetId);
+  res.json(settings || { session_duration: 50, interval_duration: 10, work_on_holidays: 0 });
 });
 
 app.put('/api/settings', authenticate, (req: any, res) => {
   if (req.user.role !== 'psychologist') return res.status(403).json({ error: 'Forbidden' });
-  const { session_duration, work_on_holidays } = req.body;
+  const { session_duration, interval_duration, work_on_holidays } = req.body;
   
   if (session_duration !== undefined) {
     db.prepare('UPDATE users SET session_duration = ? WHERE id = ?').run(session_duration, req.user.id);
+  }
+  
+  if (interval_duration !== undefined) {
+    db.prepare('UPDATE users SET interval_duration = ? WHERE id = ?').run(interval_duration, req.user.id);
   }
   
   if (work_on_holidays !== undefined) {
@@ -605,7 +609,7 @@ app.post('/api/appointments', authenticate, (req: any, res) => {
     // Send session invite email if requested
     if (req.body.receiveInvite) {
       const patientUser = db.prepare('SELECT name, email, meet_link FROM users WHERE id = ?').get(patient_id) as any;
-      const psychologistUser = db.prepare('SELECT name, email, meet_link, session_duration FROM users WHERE id = ?').get(psychologist_id) as any;
+      const psychologistUser = db.prepare('SELECT name, email, meet_link, session_duration, interval_duration FROM users WHERE id = ?').get(psychologist_id) as any;
       
       if (patientUser && psychologistUser) {
         const meetLinkRaw = patientUser.meet_link || psychologistUser.meet_link;
@@ -620,6 +624,7 @@ app.post('/api/appointments', authenticate, (req: any, res) => {
           startTime: start_time,
           endTime: end_time,
           duration: psychologistUser.session_duration,
+          interval: psychologistUser.interval_duration,
           meetLink,
           isRecurring: !!is_recurring,
           frequency: req.body.frequency
@@ -761,6 +766,31 @@ app.post('/api/checkout/pay', authenticate, (req: any, res) => {
     SET payment_status = 'paid' 
     WHERE patient_id = ? AND date LIKE ? AND status = 'scheduled' AND payment_status = 'pending'
   `).run(req.user.id, likeDate);
+
+  // Send confirmation email
+  try {
+    const patient = db.prepare('SELECT name, email, psychologist_id FROM users WHERE id = ?').get(req.user.id) as any;
+    if (patient && patient.psychologist_id) {
+      const psychologist = db.prepare('SELECT name, email FROM users WHERE id = ?').get(patient.psychologist_id) as any;
+      const amountData = db.prepare(`
+        SELECT SUM(price) as total FROM appointments 
+        WHERE patient_id = ? AND date LIKE ? AND payment_status = 'paid'
+      `).get(req.user.id, likeDate) as any;
+
+      if (psychologist) {
+        sendPaymentConfirmationEmail([patient.email, psychologist.email], {
+          payerName: patient.name,
+          receiverName: psychologist.name,
+          amount: amountData?.total || 0,
+          date: new Date().toISOString().split('T')[0],
+          description: `Sessões de Terapia - ${month}/${year}`,
+          type: 'patient_to_therapist'
+        });
+      }
+    }
+  } catch (emailErr) {
+    console.error('Error sending patient payment email:', emailErr);
+  }
   
   res.json({ message: 'Payment successful' });
 });
@@ -1079,7 +1109,7 @@ app.post('/api/checkout/create', authenticate, async (req: any, res) => {
 
     const totalAmount = months.reduce((acc: number, curr: any) => acc + curr.amount, 0);
     const amountInCents = Math.round(totalAmount * 100);
-    const description = `Comissão PsyQ - ${months.length} mês(es)`;
+    const description = `Taxa de Serviço PsyQ - ${months.length} mês(es)`;
 
     // Create PIX Charge
     const charge = await createPixCharge(amountInCents, description, {
@@ -1147,6 +1177,27 @@ app.get('/api/checkout/status/:id', authenticate, async (req, res) => {
               }
             }
           })();
+
+          // Send confirmation email
+          try {
+            const psychologist = db.prepare('SELECT name, email FROM users WHERE id = ?').get(psychologistId) as any;
+            if (psychologist) {
+              const totalAmount = months.reduce((acc: number, curr: any) => acc + curr.amount, 0);
+              const adminEmail = process.env.ADMIN_EMAIL || 'cauebin@gmail.com'; // Using user email as fallback admin
+              
+              sendPaymentConfirmationEmail([psychologist.email, adminEmail], {
+                payerName: psychologist.name,
+                receiverName: 'PsyQ Plataforma',
+                amount: totalAmount,
+                date: paymentDate,
+                description: `Taxa de Serviço PsyQ - ${months.length} mês(es)`,
+                transactionId: id,
+                type: 'therapist_to_platform'
+              });
+            }
+          } catch (emailErr) {
+            console.error('Error sending platform payment email:', emailErr);
+          }
         }
         
         // Refresh local transaction object
@@ -1247,6 +1298,28 @@ app.post('/api/webhooks/abacatepay', express.json(), (req, res) => {
           }
         }
       })();
+
+      // Send confirmation email
+      try {
+        const psychologist = db.prepare('SELECT name, email FROM users WHERE id = ?').get(psychologistId) as any;
+        if (psychologist) {
+          const totalAmount = months.reduce((acc: number, curr: any) => acc + curr.amount, 0);
+          const adminEmail = process.env.ADMIN_EMAIL || 'cauebin@gmail.com';
+          
+          sendPaymentConfirmationEmail([psychologist.email, adminEmail], {
+            payerName: psychologist.name,
+            receiverName: 'PsyQ Plataforma',
+            amount: totalAmount,
+            date: paymentDate,
+            description: `Taxa de Serviço PsyQ - ${months.length} mês(es)`,
+            transactionId: chargeId,
+            type: 'therapist_to_platform'
+          });
+        }
+      } catch (emailErr) {
+        console.error('Error sending platform payment webhook email:', emailErr);
+      }
+
       console.log(`Payment processed for transaction ${chargeId}`);
     }
   }

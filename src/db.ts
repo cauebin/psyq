@@ -25,7 +25,8 @@ db.exec(`
     previous_price REAL DEFAULT 0,
     price_effective_date TEXT,
     account_status TEXT DEFAULT 'active',
-    session_duration INTEGER DEFAULT 90,
+    session_duration INTEGER DEFAULT 50,
+    interval_duration INTEGER DEFAULT 10,
     meet_link TEXT,
     psychologist_id INTEGER,
     phone TEXT,
@@ -126,7 +127,14 @@ try {
   db.exec("ALTER TABLE users ADD COLUMN price_per_session REAL DEFAULT 0");
 } catch (e) {}
 try {
-  db.exec("ALTER TABLE users ADD COLUMN session_duration INTEGER DEFAULT 90");
+  db.exec("ALTER TABLE users ADD COLUMN session_duration INTEGER DEFAULT 50");
+} catch (e) {}
+try {
+  db.exec("ALTER TABLE users ADD COLUMN interval_duration INTEGER DEFAULT 10");
+} catch (e) {}
+try {
+  db.exec("UPDATE users SET session_duration = 50 WHERE session_duration IS NULL OR session_duration = 90");
+  db.exec("UPDATE users SET interval_duration = 10 WHERE interval_duration IS NULL");
 } catch (e) {}
 try {
   db.exec("ALTER TABLE users ADD COLUMN meet_link TEXT");

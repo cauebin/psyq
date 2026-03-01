@@ -15,7 +15,7 @@ export default function Dashboard({ user }: { user: any }) {
   const [patients, setPatients] = useState<any[]>([]);
   const [availability, setAvailability] = useState<any[]>([]);
   const [reports, setReports] = useState<any[]>([]);
-  const [settings, setSettings] = useState<any>({ session_duration: 90, work_on_holidays: 0 });
+  const [settings, setSettings] = useState<any>({ session_duration: 50, interval_duration: 10, work_on_holidays: 0 });
   const [holidays, setHolidays] = useState<any[]>([]);
   const [absences, setAbsences] = useState<any[]>([]);
   const [selectedTab, setSelectedTab] = useState('calendar');
@@ -461,8 +461,6 @@ export default function Dashboard({ user }: { user: any }) {
 
         // Check if slot overlaps with any partial absence
         const isAbsentTime = partialAbsences.some(a => {
-          // If absence spans multiple days, and this is a middle day, it's fully absent
-          // But partial absences usually are on the same day. Let's assume they apply to the times on the days they cover.
           if (a.start_time && a.end_time) {
             return (current >= a.start_time && current < a.end_time) || 
                    (slotEnd > a.start_time && slotEnd <= a.end_time) ||
@@ -494,8 +492,8 @@ export default function Dashboard({ user }: { user: any }) {
           slots.push(current);
         }
 
-        // Increment by duration
-        current = slotEnd;
+        // Increment by duration + interval
+        current = addMinutesToTime(current, settings.session_duration + (settings.interval_duration || 0));
       }
     });
 
@@ -1093,27 +1091,46 @@ export default function Dashboard({ user }: { user: any }) {
               <CardDescription>Defina a duração e o intervalo das suas sessões.</CardDescription>
             </CardHeader>
             <CardContent>
-              <form onSubmit={handleUpdateSettings} className="flex flex-col sm:flex-row items-end gap-4">
-                <div className="space-y-2 flex-1">
-                  <label className="text-sm font-medium">Tempo <strong>total</strong> entre sessões</label>
-                  <p className="text-xs text-stone-400">
-                    (exemplo: se sua sessão for de 60 minutos e o intervalo pós sessão for 30 minutos, insira 90 minutos)
-                  </p>
-                  <select 
-                    value={settings.session_duration} 
-                    onChange={(e) => setSettings({...settings, session_duration: parseInt(e.target.value)})}
-                    className="flex h-10 w-full rounded-md border border-stone-200 bg-white px-3 py-2 text-sm"
-                  >
-                    <option value="30">30 minutos</option>
-                    <option value="45">45 minutos</option>
-                    <option value="60">60 minutos</option>
-                    <option value="75">75 minutos</option>
-                    <option value="90">90 minutos</option>
-                    <option value="105">105 minutos</option>
-                    <option value="120">120 minutos</option>
-                  </select>
+              <form onSubmit={handleUpdateSettings} className="space-y-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Tempo da sessão</label>
+                    <select 
+                      value={settings.session_duration} 
+                      onChange={(e) => setSettings({...settings, session_duration: parseInt(e.target.value)})}
+                      className="flex h-10 w-full rounded-md border border-stone-200 bg-white px-3 py-2 text-sm"
+                    >
+                      <option value="10">10 minutos</option>
+                      <option value="20">20 minutos</option>
+                      <option value="30">30 minutos</option>
+                      <option value="40">40 minutos</option>
+                      <option value="50">50 minutos</option>
+                      <option value="60">60 minutos</option>
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Tempo de intervalo</label>
+                    <select 
+                      value={settings.interval_duration} 
+                      onChange={(e) => setSettings({...settings, interval_duration: parseInt(e.target.value)})}
+                      className="flex h-10 w-full rounded-md border border-stone-200 bg-white px-3 py-2 text-sm"
+                    >
+                      <option value="0">0 minutos</option>
+                      <option value="10">10 minutos</option>
+                      <option value="20">20 minutos</option>
+                      <option value="30">30 minutos</option>
+                      <option value="40">40 minutos</option>
+                      <option value="50">50 minutos</option>
+                      <option value="60">60 minutos</option>
+                    </select>
+                  </div>
                 </div>
-                <Button type="submit">Salvar Configuração</Button>
+                <div className="bg-stone-50 p-4 rounded-lg border border-stone-100">
+                  <p className="text-sm text-stone-600">
+                    <strong>Resumo:</strong> Seus horários serão marcados a cada <strong>{settings.session_duration + (settings.interval_duration || 0)} minutos</strong>.
+                  </p>
+                </div>
+                <Button type="submit" className="w-full sm:w-auto">Salvar Configuração</Button>
               </form>
             </CardContent>
           </Card>
@@ -1388,7 +1405,7 @@ export default function Dashboard({ user }: { user: any }) {
                 <Card className="border-stone-200 shadow-xl">
                   <CardHeader>
                     <CardTitle className="text-2xl font-serif">Checkout PsyQ</CardTitle>
-                    <CardDescription>Pague o percentual de {commissionRate}% sobre seu faturamento de sessões já pagas.</CardDescription>
+                    <CardDescription>Pague a taxa de serviço de {commissionRate}% sobre seu faturamento de sessões já pagas.</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-6">
                     {unpaidPlatformMonths.length === 0 ? (
@@ -1462,7 +1479,7 @@ export default function Dashboard({ user }: { user: any }) {
                         disabled={selectedPlatformMonths.length === 0}
                         onClick={handleCreatePayment}
                       >
-                        <CreditCard className="mr-2 h-5 w-5" /> Pagar Comissão
+                        <CreditCard className="mr-2 h-5 w-5" /> Pagar Taxa de Serviço
                       </Button>
                     </CardFooter>
                   )}
@@ -1471,7 +1488,7 @@ export default function Dashboard({ user }: { user: any }) {
                 {/* Platform Payment History */}
                 <Card className="mt-8 border-stone-200 shadow-sm overflow-hidden">
                   <CardHeader className="bg-stone-50/50">
-                    <CardTitle className="text-lg font-serif">Histórico de Comissões</CardTitle>
+                    <CardTitle className="text-lg font-serif">Histórico de Pagamentos</CardTitle>
                     <CardDescription>Visualize seus pagamentos anteriores à plataforma.</CardDescription>
                   </CardHeader>
                   <CardContent className="p-0">
@@ -1486,7 +1503,7 @@ export default function Dashboard({ user }: { user: any }) {
                             <tr className="border-b border-stone-100 bg-stone-50/30">
                               <th className="p-4 font-semibold text-stone-600">Mês/Ano</th>
                               <th className="p-4 font-semibold text-stone-600">Faturamento</th>
-                              <th className="p-4 font-semibold text-stone-600">Comissão</th>
+                              <th className="p-4 font-semibold text-stone-600">Taxa</th>
                               <th className="p-4 font-semibold text-stone-600">Valor Pago</th>
                               <th className="p-4 font-semibold text-stone-600">Data</th>
                             </tr>
@@ -1643,7 +1660,7 @@ export default function Dashboard({ user }: { user: any }) {
                   </div>
                   <div className="space-y-2">
                     <h2 className="text-3xl font-serif font-bold text-stone-900">Pagamento Confirmado!</h2>
-                    <p className="text-stone-500">Sua comissão com a PsyQ foi quitada com sucesso.</p>
+                    <p className="text-stone-500">Sua taxa de serviço com a PsyQ foi quitada com sucesso.</p>
                   </div>
                   <Button 
                     className="w-full bg-stone-900 hover:bg-stone-800"
