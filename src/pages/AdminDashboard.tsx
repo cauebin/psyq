@@ -15,7 +15,8 @@ import {
   TrendingUp,
   Calendar,
   UserX,
-  UserCheck
+  UserCheck,
+  AlertCircle
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -302,22 +303,28 @@ export default function AdminDashboard({ user, setUser }: { user: any, setUser: 
                           )}
                         </td>
                         <td className="p-4">
-                          <button 
-                            onClick={() => u?.role !== 'admin' && handleToggleStatus(u.id, u.deleted)}
-                            disabled={u?.role === 'admin'}
-                            className={`flex items-center gap-2 px-2 py-1 rounded-full text-xs font-medium transition-colors ${
-                              u.deleted 
-                                ? 'bg-red-100 text-red-700 hover:bg-red-200' 
-                                : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
-                            } ${u?.role === 'admin' ? 'cursor-default' : 'cursor-pointer'}`}
-                            title={u?.role === 'admin' ? '' : u.deleted ? 'Ativar conta' : 'Desativar conta'}
-                          >
-                            {u.deleted ? (
-                              <><UserX className="h-3 w-3" /> Inativa</>
-                            ) : (
-                              <><UserCheck className="h-3 w-3" /> Ativa</>
-                            )}
-                          </button>
+                          {u.blocked ? (
+                            <div className="flex items-center gap-2 px-2 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-700 cursor-default" title="Bloqueado por inadimplência">
+                              <AlertCircle className="h-3 w-3" /> Bloqueado
+                            </div>
+                          ) : (
+                            <button 
+                              onClick={() => u?.role !== 'admin' && handleToggleStatus(u.id, u.deleted)}
+                              disabled={u?.role === 'admin'}
+                              className={`flex items-center gap-2 px-2 py-1 rounded-full text-xs font-medium transition-colors ${
+                                u.deleted 
+                                  ? 'bg-red-100 text-red-700 hover:bg-red-200' 
+                                  : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                              } ${u?.role === 'admin' ? 'cursor-default' : 'cursor-pointer'}`}
+                              title={u?.role === 'admin' ? '' : u.deleted ? 'Ativar conta' : 'Desativar conta'}
+                            >
+                              {u.deleted ? (
+                                <><UserX className="h-3 w-3" /> Inativa</>
+                              ) : (
+                                <><UserCheck className="h-3 w-3" /> Ativa</>
+                              )}
+                            </button>
+                          )}
                         </td>
                         <td className="p-4 text-center space-x-2">
                           {u?.role !== 'admin' && (

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths, isSameMonth, parseISO, startOfWeek, endOfWeek, addDays, subDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, DollarSign, Users, Clock, Settings, X, Check, Link as LinkIcon, QrCode, Copy, CheckCircle2, Loader2, CreditCard, Video } from 'lucide-react';
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, DollarSign, Users, Clock, Settings, X, Check, Link as LinkIcon, QrCode, Copy, CheckCircle2, Loader2, CreditCard, Video, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -77,6 +77,12 @@ export default function Dashboard({ user }: { user: any }) {
     }
     return () => clearInterval(interval);
   }, [platformPaymentStep, paymentData]);
+
+  useEffect(() => {
+    if (user.blocked) {
+      setSelectedTab('checkout');
+    }
+  }, [user.blocked]);
 
   useEffect(() => {
     fetchData();
@@ -503,22 +509,39 @@ export default function Dashboard({ user }: { user: any }) {
 
   return (
     <div className="space-y-6">
+      {user.blocked && (
+        <div className="bg-red-50 border-l-4 border-red-500 p-6 rounded-lg shadow-sm mb-6">
+          <div className="flex items-start">
+            <AlertTriangle className="h-6 w-6 text-red-600 mt-0.5 mr-4 shrink-0" />
+            <div>
+              <h3 className="text-red-900 font-bold text-lg">Acesso Bloqueado Temporariamente</h3>
+              <p className="text-red-800 mt-2">
+                Identificamos pendências financeiras em sua conta com vencimento expirado. Para continuar utilizando a plataforma e acessando seus pacientes, agenda e relatórios, por favor regularize seus pagamentos na aba <strong>Checkout</strong> abaixo.
+              </p>
+              <p className="text-red-700 text-sm mt-2 font-medium">
+                Após a confirmação do pagamento, seu acesso será restabelecido automaticamente.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h1 className="text-3xl font-bold text-stone-900">Painel do Terapeuta</h1>
         <div className="flex flex-wrap gap-2">
-          <Button variant={selectedTab === 'calendar' ? 'default' : 'outline'} onClick={() => setSelectedTab('calendar')}>
+          <Button variant={selectedTab === 'calendar' ? 'default' : 'outline'} onClick={() => setSelectedTab('calendar')} disabled={user.blocked}>
             <CalendarIcon className="mr-2 h-4 w-4" /> Agenda
           </Button>
-          <Button variant={selectedTab === 'patients' ? 'default' : 'outline'} onClick={() => setSelectedTab('patients')}>
+          <Button variant={selectedTab === 'patients' ? 'default' : 'outline'} onClick={() => setSelectedTab('patients')} disabled={user.blocked}>
             <Users className="mr-2 h-4 w-4" /> Pacientes
           </Button>
-          <Button variant={selectedTab === 'pending' ? 'default' : 'outline'} onClick={() => setSelectedTab('pending')}>
+          <Button variant={selectedTab === 'pending' ? 'default' : 'outline'} onClick={() => setSelectedTab('pending')} disabled={user.blocked}>
             <Users className="mr-2 h-4 w-4" /> Solicitações {pendingPatients.length > 0 && <span className="ml-1 bg-red-500 text-white text-xs rounded-full px-2">{pendingPatients.length}</span>}
           </Button>
-          <Button variant={selectedTab === 'reports' ? 'default' : 'outline'} onClick={() => setSelectedTab('reports')}>
+          <Button variant={selectedTab === 'reports' ? 'default' : 'outline'} onClick={() => setSelectedTab('reports')} disabled={user.blocked}>
             <DollarSign className="mr-2 h-4 w-4" /> Relatórios
           </Button>
-          <Button variant={selectedTab === 'availability' ? 'default' : 'outline'} onClick={() => setSelectedTab('availability')}>
+          <Button variant={selectedTab === 'availability' ? 'default' : 'outline'} onClick={() => setSelectedTab('availability')} disabled={user.blocked}>
             <Clock className="mr-2 h-4 w-4" /> Disponibilidade
           </Button>
           <Button 
@@ -1594,31 +1617,6 @@ export default function Dashboard({ user }: { user: any }) {
                       )}
                     </Button>
 
-                    {/* Dev Simulation Button */}
-                    <Button 
-                      variant="outline"
-                      className="w-full border-dashed border-stone-300 text-stone-500 hover:bg-stone-50"
-                      onClick={async () => {
-                        if (!confirm('Isso simulará o pagamento como se fosse real. Continuar?')) return;
-                        setIsProcessingPlatformPayment(true);
-                        try {
-                          const token = localStorage.getItem('token');
-                          const res = await fetch(`/api/checkout/simulate/${paymentData.id}`, {
-                            method: 'POST',
-                            headers: { Authorization: `Bearer ${token}` }
-                          });
-                          if (!res.ok) throw new Error('Falha na simulação');
-                          alert('Pagamento simulado com sucesso! Aguarde a atualização.');
-                        } catch (e) {
-                          console.error(e);
-                          alert('Erro ao simular pagamento.');
-                        } finally {
-                          setIsProcessingPlatformPayment(false);
-                        }
-                      }}
-                    >
-                      🧪 Simular Pagamento (Dev)
-                    </Button>
                     <Button 
                       variant="ghost" 
                       className="w-full text-stone-500"

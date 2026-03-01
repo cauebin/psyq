@@ -36,7 +36,7 @@ export async function createPixCharge(amount: number, description: string, custo
   return data.data;
 }
 
-export async function listPixCharges() {
+export async function getPixCharge(chargeId: string) {
   const apiKey = process.env.ABACATEPAY_API_KEY;
   if (!apiKey) {
     throw new Error('ABACATEPAY_API_KEY is not defined');
@@ -52,34 +52,14 @@ export async function listPixCharges() {
 
   if (!response.ok) {
     const error = await response.text();
-    throw new Error(`AbacatePay List Error: ${error}`);
+    throw new Error(`AbacatePay Get Error: ${error}`);
   }
 
   const data = await response.json();
-  return data.data; // Array of charges
+  // The list endpoint returns an array, we need to find our specific charge
+  if (Array.isArray(data.data)) {
+    return data.data.find((c: any) => c.id === chargeId);
+  }
+  return null;
 }
 
-export async function simulatePixPayment(chargeId: string) {
-  const apiKey = process.env.ABACATEPAY_API_KEY;
-  if (!apiKey) {
-    throw new Error('ABACATEPAY_API_KEY is not defined');
-  }
-
-  // The docs say query param id, but let's try to append it to URL as query string
-  const response = await fetch(`${API_URL}/pixQrCode/simulate-payment?id=${chargeId}`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({ metadata: {} })
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`AbacatePay Simulation Error: ${error}`);
-  }
-
-  const data = await response.json();
-  return data.data;
-}

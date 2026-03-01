@@ -11,7 +11,7 @@ import dns from 'dns';
 import { promisify } from 'util';
 import { sendWelcomeEmail, sendPasswordResetEmail, sendSessionInviteEmail } from './server/email.js';
 import { validateCPF, validateEmail, validateCNPJ } from './src/utils/validation.js';
-import { createPixCharge, simulatePixPayment, listPixCharges } from './server/abacatepay.js';
+import { createPixCharge, getPixCharge } from './server/abacatepay.js';
 
 const resolveMx = promisify(dns.resolveMx);
 const dnsLookup = promisify(dns.lookup);
@@ -42,6 +42,67 @@ const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key';
 
 app.use(express.json());
 app.use(cors());
+
+// Helper to check if user is blocked due to overdue payments
+function isUserBlocked(userId: number | string): boolean {
+  const psychologist = db.prepare('SELECT commission_percentage FROM users WHERE id = ?').get(userId) as any;
+  if (!psychologist) return false;
+  
+  const commissionRate = psychologist.commission_percentage || 1.0;
+
+  // Get all months where there are paid sessions
+  const revenueByMonth = db.prepare(`
+    SELECT 
+      CAST(strftime('%m', date) AS INTEGER) as month,
+      CAST(strftime('%Y', date) AS INTEGER) as year,
+      SUM(price) as total_revenue
+    FROM appointments
+    WHERE psychologist_id = ? AND payment_status = 'paid' AND status = 'scheduled'
+    GROUP BY year, month
+  `).all(userId) as any[];
+
+  // Get total already paid for each month
+  const paidByMonth = db.prepare(`
+    SELECT month, year, SUM(amount) as total_paid
+    FROM platform_payments
+    WHERE psychologist_id = ?
+    GROUP BY year, month
+  `).all(userId) as any[];
+
+  const now = new Date();
+  const currentDay = now.getDate();
+  const currentMonth = now.getMonth() + 1; // 1-12
+  const currentYear = now.getFullYear();
+
+  for (const rev of revenueByMonth) {
+    const paid = paidByMonth.find(p => p.month === rev.month && p.year === rev.year);
+    const totalPaid = paid?.total_paid || 0;
+    const totalCommissionDue = (rev.total_revenue * commissionRate) / 100.0;
+    const remainingAmount = totalCommissionDue - totalPaid;
+
+    // If there is debt (> 0.01 to avoid float errors)
+    if (remainingAmount > 0.01) {
+      // Calculate Due Date: 15th of the NEXT month
+      let dueMonth = rev.month + 1;
+      let dueYear = rev.year;
+      if (dueMonth > 12) {
+        dueMonth = 1;
+        dueYear++;
+      }
+
+      // Check if we are past the due date
+      // If current year > due year -> Overdue
+      // If current year == due year AND current month > due month -> Overdue
+      // If current year == due year AND current month == due month AND current day > 15 -> Overdue
+      
+      if (currentYear > dueYear) return true;
+      if (currentYear === dueYear && currentMonth > dueMonth) return true;
+      if (currentYear === dueYear && currentMonth === dueMonth && currentDay > 15) return true;
+    }
+  }
+
+  return false;
+}
 
 // Authentication Middleware
 const authenticate = (req: any, res: any, next: any) => {
@@ -187,6 +248,11 @@ app.get('/api/auth/me', authenticate, (req: any, res) => {
       user.psychologist_name = psychologist.name;
       user.psychologist_email = psychologist.email;
     }
+  }
+
+  // Check if psychologist is blocked due to overdue payments
+  if (user.role === 'psychologist') {
+    user.blocked = isUserBlocked(user.id);
   }
   
   res.json(user);
@@ -785,8 +851,14 @@ app.post('/api/therapist/platform-checkout/pay', authenticate, (req: any, res) =
 
 app.get('/api/admin/users', authenticate, (req: any, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
-  const users = db.prepare("SELECT id, name, email, role, password, deleted, commission_percentage, cpf, phone FROM users").all();
-  res.json(users);
+  const users = db.prepare("SELECT id, name, email, role, password, deleted, commission_percentage, cpf, phone FROM users").all() as any[];
+  
+  const usersWithStatus = users.map(u => ({
+    ...u,
+    blocked: u.role === 'psychologist' ? isUserBlocked(u.id) : false
+  }));
+
+  res.json(usersWithStatus);
 });
 
 app.put('/api/admin/users/:id/commission', authenticate, (req: any, res) => {
@@ -1048,40 +1120,37 @@ app.get('/api/checkout/status/:id', authenticate, async (req, res) => {
   // If local status is not PAID, try to sync with AbacatePay
   if (transaction.status !== 'PAID') {
     try {
-      const charges = await listPixCharges();
-      if (Array.isArray(charges)) {
-        const remoteCharge = charges.find((c: any) => c.id === id);
+      const remoteCharge = await getPixCharge(id);
+      
+      if (remoteCharge && remoteCharge.status !== transaction.status) {
+        console.log(`Syncing transaction ${id} status: ${transaction.status} -> ${remoteCharge.status}`);
+        db.prepare('UPDATE payment_transactions SET status = ? WHERE id = ?').run(remoteCharge.status, id);
         
-        if (remoteCharge && remoteCharge.status !== transaction.status) {
-          console.log(`Syncing transaction ${id} status: ${transaction.status} -> ${remoteCharge.status}`);
-          db.prepare('UPDATE payment_transactions SET status = ? WHERE id = ?').run(remoteCharge.status, id);
-          
-          // If it was paid, we should also process the payment logic (same as webhook)
-          if (remoteCharge.status === 'PAID') {
-            const months = JSON.parse(transaction.metadata);
-            const psychologistId = transaction.psychologist_id;
-            const paymentDate = new Date().toISOString().split('T')[0];
+        // If it was paid, we should also process the payment logic (same as webhook)
+        if (remoteCharge.status === 'PAID') {
+          const months = JSON.parse(transaction.metadata);
+          const psychologistId = transaction.psychologist_id;
+          const paymentDate = new Date().toISOString().split('T')[0];
 
-            const insertPayment = db.prepare(`
-              INSERT INTO platform_payments (psychologist_id, month, year, amount, revenue, commission_rate, status, payment_date, charge_id)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `);
+          const insertPayment = db.prepare(`
+            INSERT INTO platform_payments (psychologist_id, month, year, amount, revenue, commission_rate, status, payment_date, charge_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `);
 
-            db.transaction(() => {
-              for (const m of months) {
-                const existing = db.prepare('SELECT id FROM platform_payments WHERE psychologist_id = ? AND month = ? AND year = ? AND charge_id = ?').get(psychologistId, m.month, m.year, id);
-                if (!existing) {
-                  const user = db.prepare('SELECT commission_percentage FROM users WHERE id = ?').get(psychologistId) as any;
-                  const rate = user?.commission_percentage || 1.0;
-                  insertPayment.run(psychologistId, m.month, m.year, m.amount, m.revenue, rate, 'paid', paymentDate, id);
-                }
+          db.transaction(() => {
+            for (const m of months) {
+              const existing = db.prepare('SELECT id FROM platform_payments WHERE psychologist_id = ? AND month = ? AND year = ? AND charge_id = ?').get(psychologistId, m.month, m.year, id);
+              if (!existing) {
+                const user = db.prepare('SELECT commission_percentage FROM users WHERE id = ?').get(psychologistId) as any;
+                const rate = user?.commission_percentage || 1.0;
+                insertPayment.run(psychologistId, m.month, m.year, m.amount, m.revenue, rate, 'paid', paymentDate, id);
               }
-            })();
-          }
-          
-          // Refresh local transaction object
-          transaction = db.prepare('SELECT * FROM payment_transactions WHERE id = ?').get(id) as any;
+            }
+          })();
         }
+        
+        // Refresh local transaction object
+        transaction = db.prepare('SELECT * FROM payment_transactions WHERE id = ?').get(id) as any;
       }
     } catch (error) {
       console.error('Error syncing with AbacatePay:', error);
@@ -1091,18 +1160,6 @@ app.get('/api/checkout/status/:id', authenticate, async (req, res) => {
   res.json({ status: transaction.status });
 });
 
-// Simulate Payment (Dev/Test only)
-app.post('/api/checkout/simulate/:id', authenticate, async (req, res) => {
-  const { id } = req.params;
-  
-  try {
-    const result = await simulatePixPayment(id);
-    res.json(result);
-  } catch (error: any) {
-    console.error('Simulation Error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
 
 // Webhook for AbacatePay
 app.post('/api/webhooks/abacatepay', express.json(), (req, res) => {
