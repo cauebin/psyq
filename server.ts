@@ -682,8 +682,8 @@ app.delete('/api/appointments/:id', authenticate, (req: any, res) => {
     return res.status(403).json({ error: 'Sessões já pagas não podem ser canceladas.' });
   }
 
-  db.prepare('DELETE FROM appointments WHERE id = ?').run(req.params.id);
-  res.json({ message: 'Appointment deleted' });
+  db.prepare("UPDATE appointments SET status = 'cancelled' WHERE id = ?").run(req.params.id);
+  res.json({ message: 'Appointment cancelled' });
 });
 
 app.put('/api/appointments/:id/payment', authenticate, (req: any, res) => {
@@ -701,19 +701,49 @@ app.put('/api/appointments/:id/payment', authenticate, (req: any, res) => {
   }
 
   db.prepare('UPDATE appointments SET payment_status = ? WHERE id = ?').run(status, req.params.id);
+
+  // If marked as paid, record in patient_checkouts
+  if (status === 'paid') {
+    const app: any = db.prepare('SELECT patient_id, psychologist_id, date, price FROM appointments WHERE id = ?').get(req.params.id);
+    if (app) {
+      const dateObj = new Date(app.date);
+      const month = dateObj.getMonth() + 1;
+      const year = dateObj.getFullYear();
+      db.prepare(`
+        INSERT INTO patient_checkouts (patient_id, psychologist_id, month, year, amount)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(app.patient_id, app.psychologist_id, month, year, app.price || 0);
+    }
+  }
+
   res.json({ message: 'Payment status updated' });
 });
 
 app.put('/api/reports/pay', authenticate, (req: any, res) => {
   if (req.user.role !== 'psychologist') return res.status(403).json({ error: 'Forbidden' });
   const { patient_id, month, year } = req.body;
-  const likeDate = `${year}-${month}-%`;
+  const likeDate = `${year}-${month.toString().padStart(2, '0')}-%`;
   
+  // Calculate total amount being paid
+  const amountData = db.prepare(`
+    SELECT SUM(COALESCE(price, 0)) as total FROM appointments 
+    WHERE patient_id = ? AND date LIKE ? AND status = 'scheduled' AND payment_status = 'pending'
+  `).get(patient_id, likeDate) as any;
+  const totalAmount = amountData?.total || 0;
+
   db.prepare(`
     UPDATE appointments 
     SET payment_status = 'paid' 
     WHERE patient_id = ? AND date LIKE ? AND status = 'scheduled' AND payment_status = 'pending'
   `).run(patient_id, likeDate);
+
+  // Record in patient_checkouts if there was an amount
+  if (totalAmount > 0) {
+    db.prepare(`
+      INSERT INTO patient_checkouts (patient_id, psychologist_id, month, year, amount)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(patient_id, req.user.id, month, year, totalAmount);
+  }
   
   res.json({ message: 'Marked as paid' });
 });

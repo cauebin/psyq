@@ -405,6 +405,36 @@ if (checkoutCount.count === 0) {
   }
 }
 
+// Backfill patient_checkouts from existing paid appointments if empty
+const patientCheckoutCount = db.prepare('SELECT COUNT(*) as count FROM patient_checkouts').get() as any;
+if (patientCheckoutCount.count === 0) {
+  const paidAppointments = db.prepare(`
+    SELECT 
+      patient_id, 
+      psychologist_id, 
+      strftime('%m', date) as month, 
+      strftime('%Y', date) as year, 
+      SUM(COALESCE(price, 0)) as total_amount,
+      MAX(date) as last_date
+    FROM appointments 
+    WHERE payment_status = 'paid' AND status = 'scheduled'
+    GROUP BY patient_id, psychologist_id, month, year
+  `).all() as any[];
+
+  if (paidAppointments.length > 0) {
+    console.log(`Backfilling ${paidAppointments.length} patient checkouts...`);
+    const insert = db.prepare(`
+      INSERT INTO patient_checkouts (patient_id, psychologist_id, month, year, amount, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    db.transaction(() => {
+      for (const a of paidAppointments) {
+        insert.run(a.patient_id, a.psychologist_id, parseInt(a.month), parseInt(a.year), a.total_amount, a.last_date);
+      }
+    })();
+  }
+}
+
 // Data correction for platform payments
 try {
   db.exec("UPDATE platform_payments SET payment_date = '2026-02-25' WHERE payment_date = '2026-02-24'");
