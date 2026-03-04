@@ -44,9 +44,9 @@ app.use(express.json());
 app.use(cors());
 
 // Helper to check if user is blocked due to overdue payments
-function isUserBlocked(userId: number | string): boolean {
+function getPsychologistDebtStatus(userId: number | string) {
   const psychologist = db.prepare('SELECT commission_percentage FROM users WHERE id = ?').get(userId) as any;
-  if (!psychologist) return false;
+  if (!psychologist) return { blocked: false, hasOverdueDebt: false, totalOverdueAmount: 0 };
   
   const commissionRate = psychologist.commission_percentage || 1.0;
 
@@ -74,6 +74,8 @@ function isUserBlocked(userId: number | string): boolean {
   const currentMonth = now.getMonth() + 1; // 1-12
   const currentYear = now.getFullYear();
 
+  let totalOverdueAmount = 0;
+
   for (const rev of revenueByMonth) {
     const paid = paidByMonth.find(p => p.month === rev.month && p.year === rev.year);
     const totalPaid = paid?.total_paid || 0;
@@ -91,17 +93,25 @@ function isUserBlocked(userId: number | string): boolean {
       }
 
       // Check if we are past the due date
-      // If current year > due year -> Overdue
-      // If current year == due year AND current month > due month -> Overdue
-      // If current year == due year AND current month == due month AND current day > 15 -> Overdue
+      const isOverdue = (currentYear > dueYear) || 
+                        (currentYear === dueYear && currentMonth > dueMonth) ||
+                        (currentYear === dueYear && currentMonth === dueMonth && currentDay > 15);
       
-      if (currentYear > dueYear) return true;
-      if (currentYear === dueYear && currentMonth > dueMonth) return true;
-      if (currentYear === dueYear && currentMonth === dueMonth && currentDay > 15) return true;
+      if (isOverdue) {
+        totalOverdueAmount += remainingAmount;
+      }
     }
   }
 
-  return false;
+  return {
+    blocked: totalOverdueAmount >= 50,
+    hasOverdueDebt: totalOverdueAmount > 0.01,
+    totalOverdueAmount
+  };
+}
+
+function isUserBlocked(userId: number | string): boolean {
+  return getPsychologistDebtStatus(userId).blocked;
 }
 
 // Authentication Middleware
@@ -667,6 +677,11 @@ app.delete('/api/appointments/:id', authenticate, (req: any, res) => {
     return res.status(403).json({ error: 'Forbidden' });
   }
 
+  // Rule: Paid appointments cannot be deleted
+  if (appointment.payment_status === 'paid') {
+    return res.status(403).json({ error: 'Sessões já pagas não podem ser canceladas.' });
+  }
+
   db.prepare('DELETE FROM appointments WHERE id = ?').run(req.params.id);
   res.json({ message: 'Appointment deleted' });
 });
@@ -675,10 +690,16 @@ app.put('/api/appointments/:id/payment', authenticate, (req: any, res) => {
   if (req.user.role !== 'psychologist') return res.status(403).json({ error: 'Forbidden' });
   
   // Verify appointment belongs to psychologist
-  const appointment: any = db.prepare('SELECT psychologist_id FROM appointments WHERE id = ?').get(req.params.id);
+  const appointment: any = db.prepare('SELECT psychologist_id, payment_status FROM appointments WHERE id = ?').get(req.params.id);
   if (!appointment || appointment.psychologist_id !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
 
   const { status } = req.body; // 'paid' or 'pending'
+
+  // Rule: Paid appointments cannot be changed back to pending
+  if (appointment.payment_status === 'paid' && status === 'pending') {
+    return res.status(403).json({ error: 'Sessões já pagas não podem ser alteradas para pendente.' });
+  }
+
   db.prepare('UPDATE appointments SET payment_status = ? WHERE id = ?').run(status, req.params.id);
   res.json({ message: 'Payment status updated' });
 });
@@ -781,13 +802,23 @@ app.post('/api/checkout/pay', authenticate, (req: any, res) => {
       const psychologist = db.prepare('SELECT name, email FROM users WHERE id = ?').get(patient.psychologist_id) as any;
       
       if (psychologist) {
+        // Record checkout
+        const result = db.prepare(`
+          INSERT INTO patient_checkouts (patient_id, psychologist_id, month, year, amount)
+          VALUES (?, ?, ?, ?, ?)
+        `).run(req.user.id, patient.psychologist_id, month, year);
+        
+        const checkoutId = result.lastInsertRowid;
+        const formattedCheckoutId = `#${checkoutId.toString().padStart(8, '0')}`;
+
         sendPaymentConfirmationEmail([patient.email, psychologist.email], {
           payerName: patient.name,
           receiverName: psychologist.name,
           amount: currentTransactionAmount,
           date: new Date().toISOString().split('T')[0],
           description: `Sessões de Terapia - ${month}/${year}`,
-          type: 'patient_to_therapist'
+          type: 'patient_to_therapist',
+          transactionId: formattedCheckoutId
         });
       }
     }
@@ -884,14 +915,30 @@ app.post('/api/therapist/platform-checkout/pay', authenticate, (req: any, res) =
 
 app.get('/api/admin/users', authenticate, (req: any, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
-  const users = db.prepare("SELECT id, name, email, role, password, deleted, commission_percentage, cpf, phone FROM users").all() as any[];
   
-  const usersWithStatus = users.map(u => ({
-    ...u,
-    blocked: u.role === 'psychologist' ? isUserBlocked(u.id) : false
-  }));
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 50;
+  const offset = (page - 1) * limit;
+  const search = req.query.search ? `%${req.query.search}%` : '%';
 
-  res.json(usersWithStatus);
+  const totalCount = db.prepare("SELECT COUNT(*) as count FROM users WHERE name LIKE ? OR email LIKE ?").get(search, search) as any;
+  const users = db.prepare("SELECT id, name, email, role, password, deleted, commission_percentage, cpf, phone FROM users WHERE name LIKE ? OR email LIKE ? LIMIT ? OFFSET ?").all(search, search, limit, offset) as any[];
+  
+  const usersWithStatus = users.map(u => {
+    const debtStatus = u.role === 'psychologist' ? getPsychologistDebtStatus(u.id) : { blocked: false, hasOverdueDebt: false };
+    return {
+      ...u,
+      blocked: debtStatus.blocked,
+      hasOverdueDebt: debtStatus.hasOverdueDebt
+    };
+  });
+
+  res.json({
+    users: usersWithStatus,
+    total: totalCount.count,
+    page,
+    limit
+  });
 });
 
 app.put('/api/admin/users/:id/commission', authenticate, (req: any, res) => {
@@ -964,6 +1011,10 @@ app.patch('/api/admin/users/:id/status', authenticate, (req: any, res) => {
 app.get('/api/admin/reports/billing', authenticate, (req: any, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
   const { month, year, paymentStatus } = req.query;
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 50;
+  const offset = (page - 1) * limit;
+
   if (!month || !year) return res.status(400).json({ error: 'Month and Year are required' });
 
   const datePrefix = `${year}-${month.toString().padStart(2, '0')}`;
@@ -976,11 +1027,21 @@ app.get('/api/admin/reports/billing', authenticate, (req: any, res) => {
   } else if (paymentStatus === 'pending') {
     paymentFilter = "AND a.payment_status = 'pending'";
   } else {
-    // 'both' or default
     paymentFilter = "AND a.payment_status IN ('paid', 'pending')";
   }
 
-  // Report 1: Billing by Patient/Therapist
+  // Report 1: Billing by Patient/Therapist (Paginated)
+  const totalBillingCount = db.prepare(`
+    SELECT COUNT(*) as count FROM (
+      SELECT p.id, t.id, a.price
+      FROM appointments a
+      JOIN users p ON a.patient_id = p.id
+      JOIN users t ON a.psychologist_id = t.id
+      WHERE a.date LIKE ? ${paymentFilter} AND a.status != 'cancelled'
+      GROUP BY p.id, t.id, a.price
+    )
+  `).get(...params) as any;
+
   const billingData = db.prepare(`
     SELECT 
       p.name as patient_name,
@@ -993,9 +1054,20 @@ app.get('/api/admin/reports/billing', authenticate, (req: any, res) => {
     JOIN users t ON a.psychologist_id = t.id
     WHERE a.date LIKE ? ${paymentFilter} AND a.status != 'cancelled'
     GROUP BY p.id, t.id, a.price
-  `).all(...params);
+    LIMIT ? OFFSET ?
+  `).all(...params, limit, offset);
 
-  // Report 2: Billing by Therapist
+  // Report 2: Billing by Therapist (Paginated)
+  const totalTherapistCount = db.prepare(`
+    SELECT COUNT(*) as count FROM (
+      SELECT t.id
+      FROM appointments a
+      JOIN users t ON a.psychologist_id = t.id
+      WHERE a.date LIKE ? ${paymentFilter} AND a.status != 'cancelled'
+      GROUP BY t.id
+    )
+  `).get(...params) as any;
+
   const therapistData = db.prepare(`
     SELECT 
       t.name as psychologist_name,
@@ -1006,14 +1078,26 @@ app.get('/api/admin/reports/billing', authenticate, (req: any, res) => {
     JOIN users t ON a.psychologist_id = t.id
     WHERE a.date LIKE ? ${paymentFilter} AND a.status != 'cancelled'
     GROUP BY t.id
-  `).all(...params);
+    LIMIT ? OFFSET ?
+  `).all(...params, limit, offset);
 
-  res.json({ billingData, therapistData });
+  res.json({ 
+    billingData, 
+    totalBilling: totalBillingCount.count,
+    therapistData,
+    totalTherapist: totalTherapistCount.count,
+    page,
+    limit
+  });
 });
 
 app.get('/api/admin/reports/commissions', authenticate, (req: any, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
-  const { month, year, status } = req.query;
+  const { month, year } = req.query;
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 50;
+  const offset = (page - 1) * limit;
+
   if (!month || !year) return res.status(400).json({ error: 'Month and Year are required' });
 
   const monthInt = parseInt(month as string);
@@ -1028,7 +1112,7 @@ app.get('/api/admin/reports/commissions', authenticate, (req: any, res) => {
     WHERE u.role = 'psychologist' AND (u.deleted = 0 OR a.id IS NOT NULL)
   `).all(datePrefix) as any[];
 
-  const commissionReport: any[] = [];
+  const fullCommissionReport: any[] = [];
 
   psychologists.forEach(p => {
     // Calculate total revenue from PAID sessions for this month
@@ -1053,7 +1137,7 @@ app.get('/api/admin/reports/commissions', authenticate, (req: any, res) => {
 
     // Add an entry for each individual payment
     payments.forEach(pay => {
-      commissionReport.push({
+      fullCommissionReport.push({
         psychologist_id: p.id,
         psychologist_name: p.name,
         commission_percentage: p.commission_percentage || 1.0,
@@ -1071,7 +1155,7 @@ app.get('/api/admin/reports/commissions', authenticate, (req: any, res) => {
     const pendingRevenue = totalCurrentRevenue - totalPaidRevenue;
 
     if (pendingCommission > 0.01) {
-      commissionReport.push({
+      fullCommissionReport.push({
         psychologist_id: p.id,
         psychologist_name: p.name,
         commission_percentage: p.commission_percentage || 1.0,
@@ -1084,15 +1168,195 @@ app.get('/api/admin/reports/commissions', authenticate, (req: any, res) => {
     }
   });
 
-  // Filter by status if requested
-  let filteredReport = commissionReport;
-  if (status === 'paid') {
-    filteredReport = commissionReport.filter(r => r.status === 'paid');
-  } else if (status === 'pending') {
-    filteredReport = commissionReport.filter(r => r.status === 'pending');
+  // Apply pagination to the generated report
+  const paginatedReport = fullCommissionReport.slice(offset, offset + limit);
+
+  res.json({
+    commissions: paginatedReport,
+    total: fullCommissionReport.length,
+    page,
+    limit
+  });
+});
+
+// Admin Patient Checkouts Report
+app.get('/api/admin/reports/patient-checkouts', authenticate, (req: any, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 50;
+  const offset = (page - 1) * limit;
+
+  const totalCount = db.prepare('SELECT COUNT(*) as count FROM patient_checkouts').get() as any;
+  
+  const checkouts = db.prepare(`
+    SELECT 
+      pc.id,
+      pc.month,
+      pc.year,
+      pc.amount,
+      pc.status,
+      pc.created_at,
+      p.name as patient_name,
+      psy.name as psychologist_name
+    FROM patient_checkouts pc
+    JOIN users p ON pc.patient_id = p.id
+    JOIN users psy ON pc.psychologist_id = psy.id
+    ORDER BY pc.created_at DESC
+    LIMIT ? OFFSET ?
+  `).all(limit, offset) as any[];
+
+  res.json({
+    checkouts: checkouts.map(c => ({
+      ...c,
+      formattedId: `#${c.id.toString().padStart(8, '0')}`
+    })),
+    total: totalCount.count,
+    page,
+    limit
+  });
+});
+
+// Admin Therapist Checkouts Report
+app.get('/api/admin/reports/therapist-checkouts', authenticate, (req: any, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 50;
+  const offset = (page - 1) * limit;
+
+  const totalCount = db.prepare('SELECT COUNT(*) as count FROM therapist_checkouts').get() as any;
+  
+  const checkouts = db.prepare(`
+    SELECT 
+      tc.id,
+      tc.amount,
+      tc.status,
+      tc.months_json,
+      tc.payment_date,
+      tc.charge_id,
+      tc.created_at,
+      psy.name as psychologist_name
+    FROM therapist_checkouts tc
+    JOIN users psy ON tc.psychologist_id = psy.id
+    ORDER BY tc.created_at DESC
+    LIMIT ? OFFSET ?
+  `).all(limit, offset) as any[];
+
+  res.json({
+    checkouts: checkouts.map(c => ({
+      ...c,
+      formattedId: `#${c.id.toString().padStart(8, '0')}`
+    })),
+    total: totalCount.count,
+    page,
+    limit
+  });
+});
+
+// Admin Manual Pay Therapist Checkout
+app.put('/api/admin/reports/therapist-checkouts/:id/pay', authenticate, (req: any, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+
+  const checkoutId = req.params.id;
+  const checkout = db.prepare('SELECT * FROM therapist_checkouts WHERE id = ?').get(checkoutId) as any;
+
+  if (!checkout) return res.status(404).json({ error: 'Checkout not found' });
+  if (checkout.status === 'PAID') return res.status(400).json({ error: 'Checkout already paid' });
+
+  const paymentDate = new Date().toISOString().split('T')[0];
+
+  db.transaction(() => {
+    // Update therapist_checkouts
+    db.prepare('UPDATE therapist_checkouts SET status = ?, payment_date = ? WHERE id = ?').run('PAID', paymentDate, checkoutId);
+
+    // Update payment_transactions if charge_id exists
+    if (checkout.charge_id) {
+      db.prepare('UPDATE payment_transactions SET status = ? WHERE id = ?').run('PAID', checkout.charge_id);
+    }
+
+    // Process Payment (similar to webhook logic)
+    const months = JSON.parse(checkout.months_json);
+    const psychologistId = checkout.psychologist_id;
+
+    const insertPayment = db.prepare(`
+      INSERT INTO platform_payments (psychologist_id, month, year, amount, revenue, commission_rate, status, payment_date, charge_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    for (const m of months) {
+      // Check if already paid
+      const existing = db.prepare('SELECT id FROM platform_payments WHERE psychologist_id = ? AND month = ? AND year = ? AND charge_id = ?').get(psychologistId, m.month, m.year, checkout.charge_id);
+      if (!existing) {
+        const user = db.prepare('SELECT commission_percentage FROM users WHERE id = ?').get(psychologistId) as any;
+        const rate = user?.commission_percentage || 1.0;
+        insertPayment.run(psychologistId, m.month, m.year, m.amount, m.revenue, rate, 'paid', paymentDate, checkout.charge_id);
+      }
+    }
+  })();
+
+  res.json({ message: 'Checkout marked as paid manually' });
+});
+
+// Admin Update Appointment Status
+app.put('/api/admin/appointments/:id/status', authenticate, (req: any, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+  const { id } = req.params;
+  const { status, payment_status } = req.body;
+
+  if (!['scheduled', 'cancelled'].includes(status)) return res.status(400).json({ error: 'Invalid status' });
+  if (!['pending', 'paid'].includes(payment_status)) return res.status(400).json({ error: 'Invalid payment status' });
+
+  db.prepare('UPDATE appointments SET status = ?, payment_status = ? WHERE id = ?').run(status, payment_status, id);
+  res.json({ message: 'Appointment status updated' });
+});
+
+// New route for Admin Sessions history
+app.get('/api/admin/reports/sessions', authenticate, (req: any, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+  const { month, year } = req.query;
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 50;
+  const offset = (page - 1) * limit;
+
+  let query = `
+    FROM appointments a
+    JOIN users p ON a.patient_id = p.id
+    JOIN users t ON a.psychologist_id = t.id
+    WHERE 1=1
+  `;
+  const params: any[] = [];
+
+  if (month && year) {
+    query += " AND a.date LIKE ?";
+    params.push(`${year}-${month.toString().padStart(2, '0')}%`);
   }
 
-  res.json(filteredReport);
+  const totalCount = db.prepare(`SELECT COUNT(*) as count ${query}`).get(...params) as any;
+  
+  const sessions = db.prepare(`
+    SELECT 
+      a.id,
+      p.name as patient_name,
+      t.name as psychologist_name,
+      a.date,
+      a.start_time,
+      a.status,
+      a.payment_status
+    ${query}
+    ORDER BY a.date DESC, a.start_time DESC
+    LIMIT ? OFFSET ?
+  `).all(...params, limit, offset) as any[];
+
+  res.json({
+    sessions: sessions.map(s => ({
+      ...s,
+      formatted_id: `#${s.id.toString().padStart(8, '0')}`
+    })),
+    total: totalCount.count,
+    page,
+    limit
+  });
 });
 
 // --- AbacatePay Integration ---
@@ -1132,6 +1396,18 @@ app.post('/api/checkout/create', authenticate, async (req: any, res) => {
       amountInCents,
       'PENDING',
       JSON.stringify(months)
+    );
+
+    // Also track in therapist_checkouts for the Admin Dashboard
+    db.prepare(`
+      INSERT INTO therapist_checkouts (psychologist_id, amount, status, months_json, charge_id)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(
+      userId,
+      totalAmount,
+      'PENDING',
+      JSON.stringify(months),
+      charge.id
     );
 
     res.json(charge);
@@ -1269,10 +1545,14 @@ app.post('/api/webhooks/abacatepay', express.json(), (req, res) => {
     db.prepare('UPDATE payment_transactions SET status = ? WHERE id = ?').run(status, chargeId);
 
     if (status === 'PAID' && transaction.status !== 'PAID') {
+      const paymentDate = new Date().toISOString().split('T')[0];
+      
+      // Update therapist_checkouts
+      db.prepare('UPDATE therapist_checkouts SET status = ?, payment_date = ? WHERE charge_id = ?').run('PAID', paymentDate, chargeId);
+
       // Process Payment
       const months = JSON.parse(transaction.metadata);
       const psychologistId = transaction.psychologist_id;
-      const paymentDate = new Date().toISOString().split('T')[0];
 
       const insertPayment = db.prepare(`
         INSERT INTO platform_payments (psychologist_id, month, year, amount, revenue, commission_rate, status, payment_date, charge_id)

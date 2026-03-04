@@ -683,7 +683,9 @@ export default function Dashboard({ user }: { user: any }) {
                               <Button 
                                 size="sm" 
                                 variant="destructive"
+                                disabled={app.payment_status === 'paid'}
                                 onClick={() => setDeletingId(app.id)}
+                                title={app.payment_status === 'paid' ? "Sessões pagas não podem ser canceladas" : ""}
                               >
                                 Deletar
                               </Button>
@@ -995,6 +997,7 @@ export default function Dashboard({ user }: { user: any }) {
                                   <Button 
                                     size="sm" 
                                     variant={app.payment_status === 'paid' ? 'outline' : 'default'}
+                                    disabled={app.payment_status === 'paid'}
                                     onClick={async () => {
                                       const newStatus = app.payment_status === 'paid' ? 'pending' : 'paid';
                                       const token = localStorage.getItem('token');
@@ -1009,7 +1012,7 @@ export default function Dashboard({ user }: { user: any }) {
                                       fetchData();
                                     }}
                                   >
-                                    {app.payment_status === 'paid' ? 'Marcar como Pendente' : 'Marcar como Pago'}
+                                    {app.payment_status === 'paid' ? 'Pago' : 'Marcar como Pago'}
                                   </Button>
                                 </td>
                               </tr>
@@ -1441,6 +1444,7 @@ export default function Dashboard({ user }: { user: any }) {
                                 <Checkbox 
                                   checked={selectedPlatformMonths.includes(id)}
                                   onCheckedChange={() => handleTogglePlatformMonth(id)}
+                                  onClick={(e) => e.stopPropagation()}
                                 />
                                 <div>
                                   <p className="font-medium text-stone-900">
@@ -1468,6 +1472,16 @@ export default function Dashboard({ user }: { user: any }) {
                   </CardContent>
                   {unpaidPlatformMonths.length > 0 && (
                     <CardFooter className="flex flex-col border-t pt-6 bg-stone-50/50">
+                      <div className="bg-blue-50 border border-blue-100 p-4 rounded-xl flex gap-3 items-start mb-6">
+                        <Clock className="h-5 w-5 text-blue-600 shrink-0 mt-0.5" />
+                        <div>
+                          <p className="text-sm font-medium text-blue-900">Pagamento Mínimo: R$ 50,00</p>
+                          <p className="text-xs text-blue-700">
+                            O valor mínimo para pagamentos à plataforma é de R$ 50,00. Se o seu saldo devedor for menor que este valor, ele será acumulado para o próximo mês e você não será bloqueado por isso.
+                          </p>
+                        </div>
+                      </div>
+
                       <div className="flex justify-between w-full mb-6">
                         <span className="text-stone-600 font-medium">Total a Pagar</span>
                         <span className="text-2xl font-bold text-stone-900">
@@ -1476,11 +1490,16 @@ export default function Dashboard({ user }: { user: any }) {
                       </div>
                       <Button 
                         className="w-full h-12 text-lg bg-red-600 hover:bg-red-700 text-white"
-                        disabled={selectedPlatformMonths.length === 0}
+                        disabled={selectedPlatformMonths.length === 0 || totalPlatformToPay < 50}
                         onClick={handleCreatePayment}
                       >
                         <CreditCard className="mr-2 h-5 w-5" /> Pagar Taxa de Serviço
                       </Button>
+                      {selectedPlatformMonths.length > 0 && totalPlatformToPay < 50 && (
+                        <p className="text-[10px] text-red-500 mt-2 text-center font-medium">
+                          O valor selecionado ({new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalPlatformToPay)}) é inferior ao mínimo de R$ 50,00.
+                        </p>
+                      )}
                     </CardFooter>
                   )}
                 </Card>

@@ -62,6 +62,31 @@ db.exec(`
     FOREIGN KEY (patient_id) REFERENCES users(id),
     FOREIGN KEY (psychologist_id) REFERENCES users(id)
   );
+
+  CREATE TABLE IF NOT EXISTS patient_checkouts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    patient_id INTEGER NOT NULL,
+    psychologist_id INTEGER NOT NULL,
+    month INTEGER NOT NULL,
+    year INTEGER NOT NULL,
+    amount REAL NOT NULL,
+    status TEXT DEFAULT 'paid',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (patient_id) REFERENCES users(id),
+    FOREIGN KEY (psychologist_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS therapist_checkouts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    psychologist_id INTEGER NOT NULL,
+    amount REAL NOT NULL,
+    status TEXT DEFAULT 'PENDING',
+    months_json TEXT,
+    payment_date TEXT,
+    charge_id TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (psychologist_id) REFERENCES users(id)
+  );
 `);
 
 // Seed Lívia's account if it doesn't exist
@@ -336,11 +361,11 @@ try {
 // Seed Admin account
 const adminEmail = 'admin';
 const checkAdmin = db.prepare('SELECT * FROM users WHERE email = ?').get(adminEmail);
+const initialAdminPassword = process.env.INITIAL_ADMIN_PASSWORD;
 
 if (!checkAdmin) {
-  const initialAdminPassword = process.env.INITIAL_ADMIN_PASSWORD;
   if (!initialAdminPassword) {
-    console.error('INITIAL_ADMIN_PASSWORD environment variable is not set!');
+    console.error('CRITICAL: INITIAL_ADMIN_PASSWORD environment variable is not set! Admin account will not be accessible.');
   }
   const hashedPassword = bcrypt.hashSync(initialAdminPassword || 'change-me-immediately', 10);
   db.prepare('INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)').run(
@@ -349,12 +374,35 @@ if (!checkAdmin) {
     hashedPassword,
     'admin'
   );
+  console.log('Admin account created.');
 } else {
   // Ensure role is admin if it was previously something else
   db.prepare("UPDATE users SET role = 'admin' WHERE email = ?").run(adminEmail);
-  const hashedPassword = bcrypt.hashSync('admin123', 10);
-  db.prepare("UPDATE users SET password = ? WHERE email = ?").run(hashedPassword, adminEmail);
-  console.log('Admin password forced to admin123');
+  
+  // Only update password if INITIAL_ADMIN_PASSWORD is provided to allow for resets via environment variable
+  if (initialAdminPassword) {
+    const hashedPassword = bcrypt.hashSync(initialAdminPassword, 10);
+    db.prepare("UPDATE users SET password = ? WHERE email = ?").run(hashedPassword, adminEmail);
+    console.log('Admin password updated from INITIAL_ADMIN_PASSWORD environment variable.');
+  }
+}
+
+// Backfill therapist_checkouts from payment_transactions if empty
+const checkoutCount = db.prepare('SELECT COUNT(*) as count FROM therapist_checkouts').get() as any;
+if (checkoutCount.count === 0) {
+  const transactions = db.prepare('SELECT * FROM payment_transactions').all() as any[];
+  if (transactions.length > 0) {
+    console.log(`Backfilling ${transactions.length} therapist checkouts...`);
+    const insert = db.prepare(`
+      INSERT INTO therapist_checkouts (psychologist_id, amount, status, months_json, charge_id, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    db.transaction(() => {
+      for (const t of transactions) {
+        insert.run(t.psychologist_id, t.amount / 100, t.status, t.metadata, t.id, t.created_at);
+      }
+    })();
+  }
 }
 
 // Data correction for platform payments

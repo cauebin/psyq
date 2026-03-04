@@ -267,6 +267,7 @@ export default function Checkout({ user }: { user: any }) {
                             <Checkbox 
                               checked={selectedMonths.includes(id)}
                               onCheckedChange={() => toggleMonth(id)}
+                              onClick={(e) => e.stopPropagation()}
                             />
                             <div>
                               <p className="font-medium text-stone-900">
