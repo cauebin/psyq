@@ -204,6 +204,101 @@ export async function sendPasswordResetEmail(to: string, name: string, newPasswo
   }
 }
 
+export async function sendBulkPaymentConfirmationEmail(to: string[], details: any) {
+  if (!resend) {
+    console.log(`[EMAIL MOCK] Bulk payment confirmation to ${to.join(', ')}: ${JSON.stringify(details)}`);
+    return;
+  }
+
+  const { 
+    payerName, 
+    receiverName, 
+    totalAmount, 
+    date, 
+    checkouts, 
+    type 
+  } = details;
+
+  const formattedTotal = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalAmount);
+  const formattedDate = date.split('-').reverse().join('/');
+
+  const title = 'Recibo de Pagamento Consolidado';
+  const subject = `Confirmação de Pagamento - ${formattedTotal}`;
+
+  const html = `
+    <div style="font-family: sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 12px; overflow: hidden;">
+      <div style="background: #1a1a1a; color: white; padding: 30px; text-align: center;">
+        <h1 style="margin: 0; font-size: 24px;">${title}</h1>
+        <p style="margin: 10px 0 0 0; opacity: 0.8;">Pagamento múltiplo concluído com sucesso</p>
+      </div>
+      <div style="padding: 30px;">
+        <p>Olá,</p>
+        <p>Confirmamos o recebimento do pagamento referente às sessões de terapia dos meses abaixo:</p>
+        
+        <div style="background: #f9f9f9; padding: 20px; border-radius: 8px; margin: 20px 0;">
+          <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+              <tr style="border-bottom: 1px solid #eee;">
+                <th style="text-align: left; padding: 8px 0; font-size: 12px; color: #666;">ID</th>
+                <th style="text-align: left; padding: 8px 0; font-size: 12px; color: #666;">Mês/Ano</th>
+                <th style="text-align: right; padding: 8px 0; font-size: 12px; color: #666;">Valor</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${checkouts.map((c: any) => `
+                <tr style="border-bottom: 1px solid #f4f4f4;">
+                  <td style="padding: 10px 0; font-family: monospace; font-size: 12px;">${c.id}</td>
+                  <td style="padding: 10px 0; font-size: 14px;">${c.monthYear}</td>
+                  <td style="padding: 10px 0; font-size: 14px; text-align: right; font-weight: bold;">
+                    ${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(c.amount)}
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td colspan="2" style="padding: 15px 0 0 0; font-weight: bold; text-align: right;">Total Pago:</td>
+                <td style="padding: 15px 0 0 0; font-weight: bold; text-align: right; color: #059669; font-size: 18px;">${formattedTotal}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+
+        <div style="margin-top: 20px; font-size: 14px;">
+          <p style="margin: 5px 0;"><strong>Pagador:</strong> ${payerName}</p>
+          <p style="margin: 5px 0;"><strong>Recebedor:</strong> ${receiverName}</p>
+          <p style="margin: 5px 0;"><strong>Data do Pagamento:</strong> ${formattedDate}</p>
+        </div>
+        
+        <p style="font-size: 14px; color: #666; text-align: center; margin-top: 30px;">
+          Este é um e-mail automático de confirmação. Guarde este comprovante para seus registros.
+        </p>
+      </div>
+      <div style="background: #f4f4f4; padding: 20px; text-align: center; font-size: 12px; color: #999;">
+        &copy; ${new Date().getFullYear()} PsyQ - Plataforma para Terapeutas
+      </div>
+    </div>
+  `;
+
+  try {
+    const from = process.env.EMAIL_FROM || 'PsyQ <onboarding@resend.dev>';
+    const { data, error } = await resend.emails.send({
+      from,
+      to,
+      subject,
+      html,
+    });
+
+    if (error) {
+      console.error('Resend error sending bulk payment confirmation:', error);
+    } else {
+      console.log('Bulk payment confirmation email sent successfully:', data?.id);
+    }
+  } catch (error) {
+    console.error('Unexpected error sending bulk payment confirmation:', error);
+  }
+}
+
 export async function sendPaymentConfirmationEmail(to: string[], details: any) {
   if (!resend) {
     console.log(`[EMAIL MOCK] Payment confirmation to ${to.join(', ')}: ${JSON.stringify(details)}`);

@@ -59,8 +59,10 @@ db.exec(`
     status TEXT DEFAULT 'scheduled',
     payment_status TEXT DEFAULT 'pending' CHECK(payment_status IN ('pending', 'paid')),
     price REAL,
+    patient_checkout_id INTEGER,
     FOREIGN KEY (patient_id) REFERENCES users(id),
-    FOREIGN KEY (psychologist_id) REFERENCES users(id)
+    FOREIGN KEY (psychologist_id) REFERENCES users(id),
+    FOREIGN KEY (patient_checkout_id) REFERENCES patient_checkouts(id)
   );
 
   CREATE TABLE IF NOT EXISTS patient_checkouts (

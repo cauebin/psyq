@@ -182,21 +182,26 @@ export default function Checkout({ user }: { user: any }) {
     const token = localStorage.getItem('token');
     
     try {
-      // Pay for each selected month
-      for (const monthId of selectedMonths) {
-        const [month, year] = monthId.split('-');
-        await fetch('/api/checkout/pay', {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}` 
-          },
-          body: JSON.stringify({ month, year })
-        });
-      }
+      const monthsToPay = selectedMonths.map(id => {
+        const [month, year] = id.split('-');
+        return { month, year };
+      });
+
+      const res = await fetch('/api/checkout/pay-bulk', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}` 
+        },
+        body: JSON.stringify({ months: monthsToPay })
+      });
+
+      if (!res.ok) throw new Error('Erro ao processar pagamento');
+      
       setPaymentStep('success');
     } catch (err) {
       console.error('Error processing payment:', err);
+      alert('Ocorreu um erro ao processar seu pagamento. Por favor, tente novamente.');
     } finally {
       setPaying(false);
     }

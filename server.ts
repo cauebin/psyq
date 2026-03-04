@@ -9,7 +9,7 @@ import { addWeeks, format, parseISO, getYear } from 'date-fns';
 import path from 'path';
 import dns from 'dns';
 import { promisify } from 'util';
-import { sendWelcomeEmail, sendPasswordResetEmail, sendSessionInviteEmail, sendPaymentConfirmationEmail } from './server/email.js';
+import { sendWelcomeEmail, sendPasswordResetEmail, sendSessionInviteEmail, sendPaymentConfirmationEmail, sendBulkPaymentConfirmationEmail } from './server/email.js';
 import { validateCPF, validateEmail, validateCNPJ } from './src/utils/validation.js';
 import { createPixCharge, getPixCharge } from './server/abacatepay.js';
 
@@ -805,60 +805,78 @@ app.get('/api/checkout/unpaid', authenticate, (req: any, res) => {
   res.json(unpaidSessions);
 });
 
-app.post('/api/checkout/pay', authenticate, (req: any, res) => {
+app.post('/api/checkout/pay-bulk', authenticate, (req: any, res) => {
   if (req.user.role !== 'patient') return res.status(403).json({ error: 'Forbidden' });
-  const { month, year } = req.body;
-  if (!month || !year) return res.status(400).json({ error: 'Month and Year are required' });
-
-  const likeDate = `${year}-${month.toString().padStart(2, '0')}-%`;
-  
-  // Calculate amount to be paid BEFORE updating
-  const amountData = db.prepare(`
-    SELECT SUM(COALESCE(price, 0)) as total FROM appointments 
-    WHERE patient_id = ? AND date LIKE ? AND status = 'scheduled' AND payment_status = 'pending'
-  `).get(req.user.id, likeDate) as any;
-  const currentTransactionAmount = amountData?.total || 0;
-
-  db.prepare(`
-    UPDATE appointments 
-    SET payment_status = 'paid' 
-    WHERE patient_id = ? AND date LIKE ? AND status = 'scheduled' AND payment_status = 'pending'
-  `).run(req.user.id, likeDate);
-
-  // Send confirmation email
-  try {
-    const patient = db.prepare('SELECT name, email, psychologist_id FROM users WHERE id = ?').get(req.user.id) as any;
-    if (patient && patient.psychologist_id && currentTransactionAmount > 0) {
-      const psychologist = db.prepare('SELECT name, email FROM users WHERE id = ?').get(patient.psychologist_id) as any;
-      
-      if (psychologist) {
-        // Record checkout
-        const result = db.prepare(`
-          INSERT INTO patient_checkouts (patient_id, psychologist_id, month, year, amount)
-          VALUES (?, ?, ?, ?, ?)
-        `).run(req.user.id, patient.psychologist_id, month, year, currentTransactionAmount);
-        
-        const checkoutId = result.lastInsertRowid;
-        const formattedCheckoutId = `#${checkoutId.toString().padStart(8, '0')}`;
-
-        console.log(`[CHECKOUT] Patient ${req.user.id} paid ${currentTransactionAmount} for ${month}/${year}. Checkout ID: ${formattedCheckoutId}`);
-
-        sendPaymentConfirmationEmail([patient.email, psychologist.email], {
-          payerName: patient.name,
-          receiverName: psychologist.name,
-          amount: currentTransactionAmount,
-          date: new Date().toISOString().split('T')[0],
-          description: `Sessões de Terapia - ${month}/${year}`,
-          type: 'patient_to_therapist',
-          transactionId: formattedCheckoutId
-        });
-      }
-    }
-  } catch (err) {
-    console.error('Error processing patient payment:', err);
+  const { months } = req.body; // Array of { month, year }
+  if (!months || !Array.isArray(months) || months.length === 0) {
+    return res.status(400).json({ error: 'Months are required' });
   }
+
+  const patient = db.prepare('SELECT name, email, psychologist_id FROM users WHERE id = ?').get(req.user.id) as any;
+  if (!patient || !patient.psychologist_id) return res.status(404).json({ error: 'Patient or Psychologist not found' });
   
-  res.json({ message: 'Payment successful' });
+  const psychologist = db.prepare('SELECT name, email FROM users WHERE id = ?').get(patient.psychologist_id) as any;
+  if (!psychologist) return res.status(404).json({ error: 'Psychologist not found' });
+
+  const checkoutsForEmail: any[] = [];
+  let totalAmountPaid = 0;
+
+  try {
+    db.transaction(() => {
+      for (const m of months) {
+        const { month, year } = m;
+        const likeDate = `${year}-${month.toString().padStart(2, '0')}-%`;
+
+        // Calculate amount
+        const amountData = db.prepare(`
+          SELECT SUM(COALESCE(price, 0)) as total FROM appointments 
+          WHERE patient_id = ? AND date LIKE ? AND status = 'scheduled' AND payment_status = 'pending'
+        `).get(req.user.id, likeDate) as any;
+        const amount = amountData?.total || 0;
+
+        if (amount > 0) {
+          // Create checkout record
+          const result = db.prepare(`
+            INSERT INTO patient_checkouts (patient_id, psychologist_id, month, year, amount, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+          `).run(req.user.id, patient.psychologist_id, month, year, amount, new Date().toISOString());
+          
+          const checkoutId = result.lastInsertRowid;
+
+          // Update appointments and link to checkout
+          db.prepare(`
+            UPDATE appointments 
+            SET payment_status = 'paid', patient_checkout_id = ?
+            WHERE patient_id = ? AND date LIKE ? AND status = 'scheduled' AND payment_status = 'pending'
+          `).run(checkoutId, req.user.id, likeDate);
+
+          checkoutsForEmail.push({
+            id: `#${checkoutId.toString().padStart(8, '0')}`,
+            monthYear: `${month}/${year}`,
+            amount
+          });
+          totalAmountPaid += amount;
+        }
+      }
+    })();
+
+    if (checkoutsForEmail.length > 0) {
+      // Send consolidated email
+      sendBulkPaymentConfirmationEmail([patient.email, psychologist.email], {
+        payerName: patient.name,
+        receiverName: psychologist.name,
+        totalAmount: totalAmountPaid,
+        date: new Date().toISOString().split('T')[0],
+        checkouts: checkoutsForEmail,
+        type: 'patient_to_therapist'
+      });
+    }
+
+    res.json({ message: 'Bulk payment successful', count: checkoutsForEmail.length });
+  } catch (err) {
+    console.error('Error processing bulk payment:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // Therapist Platform Checkout Routes
@@ -1234,7 +1252,7 @@ app.get('/api/admin/reports/patient-checkouts', authenticate, (req: any, res) =>
     FROM patient_checkouts pc
     JOIN users p ON pc.patient_id = p.id
     JOIN users psy ON pc.psychologist_id = psy.id
-    ORDER BY pc.created_at DESC
+    ORDER BY pc.id ASC
     LIMIT ? OFFSET ?
   `).all(limit, offset) as any[];
 
@@ -1247,6 +1265,20 @@ app.get('/api/admin/reports/patient-checkouts', authenticate, (req: any, res) =>
     page,
     limit
   });
+});
+
+// Admin Patient Checkout Sessions
+app.get('/api/admin/reports/patient-checkouts/:id/sessions', authenticate, (req: any, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+  
+  const sessions = db.prepare(`
+    SELECT id, date, start_time, price
+    FROM appointments
+    WHERE patient_checkout_id = ?
+    ORDER BY date ASC, start_time ASC
+  `).all(req.params.id);
+  
+  res.json(sessions);
 });
 
 // Admin Therapist Checkouts Report
@@ -1271,7 +1303,7 @@ app.get('/api/admin/reports/therapist-checkouts', authenticate, (req: any, res) 
       psy.name as psychologist_name
     FROM therapist_checkouts tc
     JOIN users psy ON tc.psychologist_id = psy.id
-    ORDER BY tc.created_at DESC
+    ORDER BY tc.id ASC
     LIMIT ? OFFSET ?
   `).all(limit, offset) as any[];
 
@@ -1376,7 +1408,7 @@ app.get('/api/admin/reports/sessions', authenticate, (req: any, res) => {
       a.status,
       a.payment_status
     ${query}
-    ORDER BY a.date DESC, a.start_time DESC
+    ORDER BY a.id ASC
     LIMIT ? OFFSET ?
   `).all(...params, limit, offset) as any[];
 
@@ -1432,14 +1464,15 @@ app.post('/api/checkout/create', authenticate, async (req: any, res) => {
 
     // Also track in therapist_checkouts for the Admin Dashboard
     db.prepare(`
-      INSERT INTO therapist_checkouts (psychologist_id, amount, status, months_json, charge_id)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO therapist_checkouts (psychologist_id, amount, status, months_json, charge_id, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
     `).run(
       userId,
       totalAmount,
       'PENDING',
       JSON.stringify(months),
-      charge.id
+      charge.id,
+      new Date().toISOString()
     );
 
     res.json(charge);

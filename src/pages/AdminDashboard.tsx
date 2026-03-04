@@ -19,7 +19,8 @@ import {
   AlertCircle,
   Clock,
   CreditCard,
-  CheckCircle2
+  CheckCircle2,
+  Loader2
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -74,6 +75,9 @@ export default function AdminDashboard({ user, setUser }: { user: any, setUser: 
   
   const [editingUser, setEditingUser] = useState<any>(null);
   const [editingSession, setEditingSession] = useState<any>(null);
+  const [expandedCheckoutId, setExpandedCheckoutId] = useState<number | null>(null);
+  const [checkoutSessions, setCheckoutSessions] = useState<any[]>([]);
+  const [loadingSessions, setLoadingSessions] = useState(false);
   const [newEmail, setNewEmail] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newCommission, setNewCommission] = useState(1.0);
@@ -128,6 +132,30 @@ export default function AdminDashboard({ user, setUser }: { user: any, setUser: 
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchCheckoutSessions = async (checkoutId: number) => {
+    if (expandedCheckoutId === checkoutId) {
+      setExpandedCheckoutId(null);
+      return;
+    }
+    
+    setLoadingSessions(true);
+    setExpandedCheckoutId(checkoutId);
+    const token = localStorage.getItem('token');
+    try {
+      const res = await fetch(`/api/admin/reports/patient-checkouts/${checkoutId}/sessions`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCheckoutSessions(data);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingSessions(false);
     }
   };
 
@@ -1142,7 +1170,7 @@ export default function AdminDashboard({ user, setUser }: { user: any, setUser: 
                   <table className="w-full text-sm text-left">
                     <thead className="text-xs uppercase bg-stone-50 text-stone-500 font-medium">
                       <tr>
-                        <th className="px-6 py-4">ID do Checkout</th>
+                        <th className="px-6 py-4">ID</th>
                         <th className="px-6 py-4">Paciente</th>
                         <th className="px-6 py-4">Terapeuta</th>
                         <th className="px-6 py-4">Mês/Ano</th>
@@ -1154,23 +1182,63 @@ export default function AdminDashboard({ user, setUser }: { user: any, setUser: 
                     <tbody className="divide-y divide-stone-100">
                       {patientCheckouts.length > 0 ? (
                         patientCheckouts.map((checkout) => (
-                          <tr key={checkout.id} className="hover:bg-stone-50 transition-colors">
-                            <td className="px-6 py-4 font-mono text-xs font-medium text-stone-900">{checkout.formattedId}</td>
-                            <td className="px-6 py-4 font-medium text-stone-900">{checkout.patient_name}</td>
-                            <td className="px-6 py-4 text-stone-600">{checkout.psychologist_name}</td>
-                            <td className="px-6 py-4 text-stone-600">{`${checkout.month}/${checkout.year}`}</td>
-                            <td className="px-6 py-4 font-medium text-emerald-600">
-                              {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(checkout.amount)}
-                            </td>
-                            <td className="px-6 py-4">
-                              <span className="px-2 py-1 rounded-full text-[10px] font-bold uppercase bg-emerald-100 text-emerald-700">
-                                {checkout.status === 'paid' ? 'Pago' : checkout.status}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 text-stone-500 text-xs">
-                              {new Date(checkout.created_at).toLocaleDateString('pt-BR')}
-                            </td>
-                          </tr>
+                          <React.Fragment key={checkout.id}>
+                            <tr 
+                              className="hover:bg-stone-50 transition-colors cursor-pointer"
+                              onClick={() => fetchCheckoutSessions(checkout.id)}
+                            >
+                              <td className="px-6 py-4 font-mono text-xs font-medium text-stone-900 flex items-center gap-2">
+                                {checkout.formattedId}
+                                <span className="text-[10px] text-stone-400">
+                                  {expandedCheckoutId === checkout.id ? '▲' : '▼'}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 font-medium text-stone-900">{checkout.patient_name}</td>
+                              <td className="px-6 py-4 text-stone-600">{checkout.psychologist_name}</td>
+                              <td className="px-6 py-4 text-stone-600">{`${checkout.month}/${checkout.year}`}</td>
+                              <td className="px-6 py-4 font-medium text-emerald-600">
+                                {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(checkout.amount)}
+                              </td>
+                              <td className="px-6 py-4">
+                                <span className="px-2 py-1 rounded-full text-[10px] font-bold uppercase bg-emerald-100 text-emerald-700">
+                                  {checkout.status === 'paid' ? 'Pago' : checkout.status}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 text-stone-500 text-xs">
+                                {new Date(checkout.created_at).toLocaleDateString('pt-BR')}
+                              </td>
+                            </tr>
+                            {expandedCheckoutId === checkout.id && (
+                              <tr className="bg-stone-50/50">
+                                <td colSpan={7} className="px-6 py-4">
+                                  <div className="bg-white rounded-lg border border-stone-100 shadow-inner p-4">
+                                    <h4 className="text-xs font-bold uppercase tracking-wider text-stone-400 mb-3">Sessões incluídas neste checkout:</h4>
+                                    {loadingSessions ? (
+                                      <div className="flex items-center justify-center py-4">
+                                        <Loader2 className="h-4 w-4 animate-spin text-stone-300" />
+                                      </div>
+                                    ) : checkoutSessions.length > 0 ? (
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                                        {checkoutSessions.map((session) => (
+                                          <div key={session.id} className="flex justify-between items-center p-2 bg-stone-50 rounded border border-stone-100">
+                                            <div>
+                                              <p className="text-[10px] font-mono text-stone-400">#{session.id.toString().padStart(8, '0')}</p>
+                                              <p className="text-xs font-medium text-stone-700">{session.date.split('-').reverse().join('/')} às {session.start_time}</p>
+                                            </div>
+                                            <p className="text-xs font-bold text-stone-900">
+                                              {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(session.price)}
+                                            </p>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <p className="text-xs text-stone-400 italic">Nenhuma sessão detalhada encontrada para este registro antigo.</p>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
                         ))
                       ) : (
                         <tr>
@@ -1232,7 +1300,7 @@ export default function AdminDashboard({ user, setUser }: { user: any, setUser: 
                   <table className="w-full text-sm text-left">
                     <thead className="text-xs uppercase bg-stone-50 text-stone-500 font-medium">
                       <tr>
-                        <th className="px-6 py-4">ID do Checkout</th>
+                        <th className="px-6 py-4">ID</th>
                         <th className="px-6 py-4">Terapeuta</th>
                         <th className="px-6 py-4">Mês/Ano</th>
                         <th className="px-6 py-4">Valor</th>
