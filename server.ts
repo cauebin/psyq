@@ -836,10 +836,12 @@ app.post('/api/checkout/pay', authenticate, (req: any, res) => {
         const result = db.prepare(`
           INSERT INTO patient_checkouts (patient_id, psychologist_id, month, year, amount)
           VALUES (?, ?, ?, ?, ?)
-        `).run(req.user.id, patient.psychologist_id, month, year);
+        `).run(req.user.id, patient.psychologist_id, month, year, currentTransactionAmount);
         
         const checkoutId = result.lastInsertRowid;
         const formattedCheckoutId = `#${checkoutId.toString().padStart(8, '0')}`;
+
+        console.log(`[CHECKOUT] Patient ${req.user.id} paid ${currentTransactionAmount} for ${month}/${year}. Checkout ID: ${formattedCheckoutId}`);
 
         sendPaymentConfirmationEmail([patient.email, psychologist.email], {
           payerName: patient.name,
@@ -852,8 +854,8 @@ app.post('/api/checkout/pay', authenticate, (req: any, res) => {
         });
       }
     }
-  } catch (emailErr) {
-    console.error('Error sending patient payment email:', emailErr);
+  } catch (err) {
+    console.error('Error processing patient payment:', err);
   }
   
   res.json({ message: 'Payment successful' });
