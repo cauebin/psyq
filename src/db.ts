@@ -185,6 +185,10 @@ try {
   db.exec("ALTER TABLE users ADD COLUMN work_on_holidays INTEGER DEFAULT 0");
 } catch (e) {}
 
+try {
+  db.exec("ALTER TABLE appointments ADD COLUMN patient_checkout_id INTEGER REFERENCES patient_checkouts(id)");
+} catch (e) {}
+
 // Migration for platform_payments: remove unique constraint
 try {
   const tableInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='platform_payments'").get() as any;

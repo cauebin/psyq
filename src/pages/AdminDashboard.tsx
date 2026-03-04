@@ -1205,7 +1205,7 @@ export default function AdminDashboard({ user, setUser }: { user: any, setUser: 
                                 </span>
                               </td>
                               <td className="px-6 py-4 text-stone-500 text-xs">
-                                {new Date(checkout.created_at).toLocaleDateString('pt-BR')}
+                                {new Date(checkout.created_at.replace(' ', 'T') + (checkout.created_at.includes('Z') ? '' : 'Z')).toLocaleDateString('pt-BR')}
                               </td>
                             </tr>
                             {expandedCheckoutId === checkout.id && (
@@ -1334,7 +1334,7 @@ export default function AdminDashboard({ user, setUser }: { user: any, setUser: 
                                 </span>
                               </td>
                               <td className="px-6 py-4 text-stone-500 text-xs">
-                                {new Date(checkout.created_at).toLocaleDateString('pt-BR')}
+                                {new Date(checkout.created_at.replace(' ', 'T') + (checkout.created_at.includes('Z') ? '' : 'Z')).toLocaleDateString('pt-BR')}
                               </td>
                               <td className="px-6 py-4 font-mono text-[10px] text-stone-400">{checkout.charge_id}</td>
                               <td className="px-6 py-4">
